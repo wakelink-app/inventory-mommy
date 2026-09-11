@@ -1,0 +1,199 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String           @id @default(cuid())
+  email        String           @unique
+  passwordHash String
+  createdAt    DateTime         @default(now())
+  items        Item[]
+  locations    Location[]
+  labels       CustomLabel[]
+  sessions     Session[]
+  captures     CaptureSession[]
+  partSheets   PartSheet[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Location {
+  id              String     @id @default(cuid())
+  name            String
+  code            String?
+  type            String
+  parentId        String?
+  parent          Location?  @relation("LocationTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Location[] @relation("LocationTree")
+  defaultCategory String?
+  userId          String
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items           Item[]
+  partSheets      PartSheet[]
+  createdAt       DateTime   @default(now())
+
+  @@unique([userId, code])
+}
+
+model Item {
+  id         String         @id @default(cuid())
+  sku        String?
+  title      String
+  brand      String?
+  model      String?
+  condition  String?
+  category   String?
+  quantity   Int            @default(1)
+  notes      String?
+  status     String         @default("stored")
+  locationId String?
+  location   Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  photos     Photo[]
+  draft      ListingDraft?
+  partSheets PartSheet[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  filename  String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model CaptureSession {
+  id        String         @id @default(cuid())
+  token     String         @unique
+  status    String         @default("waiting")
+  hint      String         @default("")
+  itemId    String?
+  userId    String?
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime       @default(now())
+  expiresAt DateTime
+  photos    CapturePhoto[]
+}
+
+model CapturePhoto {
+  id        String         @id @default(cuid())
+  sessionId String
+  session   CaptureSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  filename  String
+  sortOrder Int            @default(0)
+  createdAt DateTime       @default(now())
+}
+
+model ListingDraft {
+  id             String   @id @default(cuid())
+  itemId         String   @unique
+  item           Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  title          String
+  description    String
+  categoryId     String?
+  categoryName   String?
+  suggestedPrice Float?
+  priceLow       Float?
+  priceMedian    Float?
+  priceHigh      Float?
+  condition      String?
+  searchQuery    String?
+  compsJson      String   @default("[]")
+  status         String   @default("draft")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model CustomLabel {
+  id        String   @id @default(cuid())
+  code      String
+  name      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, code])
+}
+
+model PartSheet {
+  id                String          @id @default(cuid())
+  code              String
+  userId            String
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceItemId      String?
+  sourceItem        Item?           @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  sourceItemSku     String?
+  locationId        String?
+  location          Location?       @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  locationLabel     String?
+  masterTitle       String
+  masterBrand       String?
+  masterModel       String?
+  masterDescription String          @default("")
+  hint              String          @default("")
+  photoFilename     String?
+  status            String          @default("draft")
+  lines             PartSheetLine[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([userId, code])
+}
+
+model PartSheetLine {
+  id             String    @id @default(cuid())
+  sheetId        String
+  sheet          PartSheet @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  sortOrder      Int       @default(0)
+  sku            String
+  partType       String?
+  title          String
+  description    String    @default("")
+  condition      String?
+  suggestedPrice Float?
+  priceLow       Float?
+  priceHigh      Float?
+  categoryName   String?
+  categoryId     String?
+  compsJson      String    @default("[]")
+  priceNote      String    @default("")
+  priceSourceUrl String?
+  priceSource    String?
+  priceAltSourceUrl String?
+  priceAltSource    String?
+  searchQuery     String?
+  imageUrl        String?
+  imageNote       String    @default("")
+  imageSourceUrl  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model PartImageCache {
+  id        String   @id @default(cuid())
+  brand     String
+  modelNum  String
+  partType  String
+  imageUrl  String
+  source    String
+  createdAt DateTime @default(now())
+
+  @@unique([brand, modelNum, partType])
+}

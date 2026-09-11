@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Photos sent</title>
+    <style>
+      :root {
+        --accent: #5b5ceb;
+        --paper: #f5f6fa;
+        --card: #fff;
+        --ink: #1c1d21;
+        --muted: #6b7280;
+        --ok: #087443;
+        --ok-soft: #e7f8ef;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+      }
+      main {
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem 1.25rem calc(1.5rem + env(safe-area-inset-bottom));
+        text-align: center;
+      }
+      .mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 4.5rem;
+        height: 4.5rem;
+        border-radius: 999px;
+        background: var(--ok-soft);
+        color: var(--ok);
+        font-size: 2rem;
+        font-weight: 700;
+      }
+      h1 {
+        margin: 1.1rem 0 0;
+        font-size: 1.6rem;
+        letter-spacing: -0.03em;
+      }
+      p {
+        margin: 0.55rem 0 0;
+        max-width: 20rem;
+        color: var(--muted);
+        font-size: 1rem;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">✓</div>
+      <h1>Photos sent</h1>
+      <p>You can put the phone down. Finish the listing on the computer.</p>
+    </main>
+  </body>
+</html>

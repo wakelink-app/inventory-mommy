@@ -1,0 +1,13 @@
+import type { MetadataRoute } from "next";
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: "Inventory Mommy",
+    short_name: "Inventory Mommy",
+    description: "Identify, price, and catalog items by bin.",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#f5f6fa",
+    theme_color: "#5B5CEB",
+  };
+}

@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Add item</title>
+    <style>
+      :root {
+        --accent: #5b5ceb;
+        --paper: #f5f6fa;
+        --card: #fff;
+        --ink: #1c1d21;
+        --muted: #6b7280;
+        --line: #e6e8ef;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+      }
+      main {
+        display: flex;
+        flex-direction: column;
+        min-height: 100dvh;
+        max-width: 28rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem calc(1.5rem + env(safe-area-inset-bottom));
+        text-align: center;
+      }
+      .kicker {
+        margin: 0;
+        font-size: 0.72rem;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 { margin: 0.35rem 0 0; font-size: 1.45rem; letter-spacing: -0.03em; }
+      .sub { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+      .error {
+        margin-top: 0.9rem;
+        background: #fff1f1;
+        color: #b42318;
+        border-radius: 12px;
+        padding: 0.7rem 0.85rem;
+        font-size: 0.9rem;
+        text-align: left;
+      }
+      .ok {
+        margin-top: 1.25rem;
+        background: #e7f8ef;
+        color: #087443;
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        font-size: 0.9rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+      .thumb {
+        position: relative;
+        aspect-ratio: 1;
+        overflow: hidden;
+        border-radius: 12px;
+        background: #eef0f4;
+      }
+      .thumb img { width: 100%; height: 100%; object-fit: cover; }
+      .thumb button {
+        position: absolute;
+        top: 0.3rem;
+        right: 0.3rem;
+        border: 0;
+        border-radius: 6px;
+        background: rgba(0,0,0,.6);
+        color: #fff;
+        width: 1.6rem;
+        height: 1.6rem;
+      }
+      #shoot {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        width: 100%;
+      }
+      .row {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+      }
+      button.primary, button.secondary, textarea { font: inherit; }
+      button.primary, button.secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 3.5rem;
+        border-radius: 10px;
+        font-weight: 600;
+        text-align: center;
+      }
+      button.secondary {
+        flex: 1;
+        max-width: 10.5rem;
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+      }
+      button.primary {
+        width: min(100%, 22rem);
+        border: 0;
+        background: var(--accent);
+        color: #fff;
+      }
+      button.primary:disabled, button.secondary:disabled { opacity: 0.5; }
+      textarea {
+        width: 100%;
+        min-height: 7rem;
+        margin-top: 1rem;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        padding: 0.8rem 2.75rem 0.8rem 0.8rem;
+        font: inherit;
+        resize: vertical;
+        text-align: left;
+      }
+      .hint-wrap { position: relative; width: 100%; text-align: left; }
+      .mic {
+        position: absolute;
+        right: 0.55rem;
+        bottom: 0.55rem;
+        border: 0;
+        border-radius: 8px;
+        background: var(--paper);
+        color: var(--muted);
+        width: 2.2rem;
+        height: 2.2rem;
+        font-size: 1rem;
+      }
+      .mic.on { background: #fff1f1; color: #b42318; }
+      .hint-label {
+        margin: 0.75rem 0 0;
+        font-size: 0.92rem;
+        font-weight: 600;
+        text-align: left;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="kicker">Add item</p>
+      <h1 id="title">Take photos</h1>
+      <p class="sub" id="sub">Up to 5 photos. Then press Done.</p>
+      <p class="error" id="error" hidden></p>
+      <div class="grid" id="grid"></div>
+      <div id="shoot">
+        <div class="row">
+          <button class="secondary" id="cameraBtn" type="button">Take photo</button>
+          <button class="secondary" id="uploadBtn" type="button">Upload</button>
+        </div>
+        <input id="camera" type="file" accept="image/*" capture="environment" hidden />
+        <input id="library" type="file" accept="image/*" multiple hidden />
+        <button class="primary" id="doneBtn" type="button">Done</button>
+      </div>
+      <div id="hintBox" hidden>
+        <p class="ok">Photos sent to your computer.</p>
+        <p class="hint-label">Tell the AI about this device</p>
+        <div class="hint-wrap">
+          <textarea id="hint" placeholder="e.g. iCloud locked, screen is cracked, good for parts"></textarea>
+          <button class="mic" id="micBtn" type="button" aria-label="Speak">🎤</button>
+        </div>
+        <p class="sub" id="hintStatus">Saved automatically. Finish on the computer, or keep typing here.</p>
+      </div>
+    </main>
+    <script>
+      const token = new URLSearchParams(location.search).get("t")
+        || document.documentElement.getAttribute("data-token")
+        || (location.pathname.match(/\/capture\/([^/?#]+)/) || [])[1]
+        || "";
+      const supabaseUrl = document.documentElement.getAttribute("data-supabase")
+        || "https://mqdykbkqlbatwhczryqo.supabase.co";
+      const sessionUrl = supabaseUrl.replace(/\/$/, "")
+        + "/storage/v1/object/public/capture-public/sessions/"
+        + encodeURIComponent(token) + ".json";
+      const errorEl = document.getElementById("error");
+      const grid = document.getElementById("grid");
+      const shoot = document.getElementById("shoot");
+      const hintBox = document.getElementById("hintBox");
+      const hintEl = document.getElementById("hint");
+      const hintStatus = document.getElementById("hintStatus");
+      const title = document.getElementById("title");
+      const sub = document.getElementById("sub");
+      let session = null;
+      let busy = false;
+      let queued = null;
+      let hintTimer = null;
+      let listening = false;
+      let recognition = null;
+      let pollTimer = null;
+
+      function showError(msg) {
+        errorEl.hidden = !msg;
+        errorEl.textContent = msg || "";
+      }
+
+      function render() {
+        if (!session) return;
+        const locked = session.status === "ready" || session.status === "generating" || session.status === "complete";
+        title.textContent = locked ? "Photos sent" : "Take photos";
+        sub.textContent = locked
+          ? "Add details for the AI below."
+          : "Take or upload up to 5 photos, then press Done.";
+        shoot.hidden = locked;
+        hintBox.hidden = !locked;
+        document.getElementById("doneBtn").disabled = busy || session.photos.length === 0;
+        document.getElementById("cameraBtn").disabled = busy || session.photos.length >= session.maxPhotos;
+        document.getElementById("uploadBtn").disabled = busy || session.photos.length >= session.maxPhotos;
+        if (locked && hintEl && document.activeElement !== hintEl) {
+          hintEl.value = session.hint || "";
+        }
+        grid.innerHTML = "";
+        for (const photo of session.photos) {
+          const wrap = document.createElement("div");
+          wrap.className = "thumb";
+          const img = document.createElement("img");
+          img.src = photo.preview || photo.url || "";
+          wrap.appendChild(img);
+          if (!locked) {
+            const x = document.createElement("button");
+            x.type = "button";
+            x.textContent = "×";
+            x.onclick = () => removePhoto(photo.id);
+            wrap.appendChild(x);
+          }
+          grid.appendChild(wrap);
+        }
+      }
+
+      async function writeSession() {
+        const payload = {
+          ...session,
+          photos: session.photos.map((p) => ({ id: p.id, path: p.path })),
+        };
+        const res = await fetch(session.sessionUploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "x-upsert": "true" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("Could not update session");
+      }
+
+      function scheduleHintSave() {
+        if (!session || !hintEl) return;
+        session.hint = hintEl.value;
+        clearTimeout(hintTimer);
+        hintTimer = setTimeout(async () => {
+          try {
+            await writeSession();
+            if (hintStatus) hintStatus.textContent = "Saved. Finish on the computer when ready.";
+          } catch (err) {
+            if (hintStatus) hintStatus.textContent = err.message || "Could not save note";
+          }
+        }, 600);
+      }
+
+      let micStoppedIntentionally = false;
+
+      function stopMic() {
+        if (!recognition) return;
+        micStoppedIntentionally = true;
+        recognition.stop();
+        listening = false;
+        if (micBtn) micBtn.classList.remove("on");
+      }
+
+      function toggleMic() {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById("micBtn");
+        if (!SR) {
+          showError("Speech-to-text is not supported here. Type instead.");
+          return;
+        }
+        if (listening) {
+          stopMic();
+          return;
+        }
+        showError("");
+        micStoppedIntentionally = false;
+        recognition = new SR();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+        recognition.onresult = (event) => {
+          let chunk = "";
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) chunk += event.results[i][0].transcript;
+          }
+          if (!chunk.trim() || !hintEl) return;
+          const base = hintEl.value.trim();
+          hintEl.value = base ? `${base} ${chunk.trim()}` : chunk.trim();
+          scheduleHintSave();
+        };
+        recognition.onend = () => {
+          listening = false;
+          micStoppedIntentionally = false;
+          if (micBtn) micBtn.classList.remove("on");
+        };
+        recognition.onerror = (event) => {
+          listening = false;
+          if (micBtn) micBtn.classList.remove("on");
+          const code = event && event.error ? event.error : "";
+          if (micStoppedIntentionally || code === "aborted" || code === "no-speech") return;
+          showError("Could not hear you. Try again.");
+        };
+        recognition.start();
+        listening = true;
+        if (micBtn) micBtn.classList.add("on");
+      }
+
+      async function load() {
+        if (!token) {
+          showError("Missing session. Scan the QR code again.");
+          return;
+        }
+        const res = await fetch(sessionUrl + "?v=" + Date.now());
+        if (!res.ok) {
+          showError("Link expired or not found.");
+          return;
+        }
+        session = await res.json();
+        render();
+        if (queued) {
+          const next = queued;
+          queued = null;
+          uploadFiles(next);
+        }
+      }
+
+      async function refreshSession() {
+        if (!token) return;
+        const res = await fetch(sessionUrl + "?v=" + Date.now());
+        if (!res.ok) return;
+        const next = await res.json();
+        if (!session) {
+          session = next;
+          render();
+          return;
+        }
+        session.status = next.status;
+        session.hint = next.hint || session.hint;
+        if (next.photos.length >= session.photos.length) {
+          session.photos = next.photos.map((photo) => {
+            const existing = session.photos.find((p) => p.id === photo.id);
+            return existing ? { ...existing, path: photo.path } : photo;
+          });
+        }
+        render();
+      }
+
+      async function uploadFiles(list) {
+        if (!list) return;
+        if (!session) {
+          queued = list;
+          return;
+        }
+        const files = Array.from(list).filter((f) => f.type.startsWith("image/") || f.type === "");
+        showError("");
+        busy = true;
+        render();
+        try {
+          for (const file of files) {
+            if (session.photos.length >= session.maxPhotos) break;
+            const used = new Set(session.photos.map((p) => p.id));
+            const slot = (session.slots || []).find((s) => !used.has(s.id));
+            if (!slot) break;
+            const put = await fetch(slot.uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" },
+              body: file,
+            });
+            if (!put.ok) throw new Error("Upload failed");
+            session.photos.push({
+              id: slot.id,
+              path: slot.path,
+              preview: URL.createObjectURL(file),
+            });
+            session.status = "capturing";
+            await writeSession();
+            render();
+          }
+        } catch (err) {
+          showError(err.message || "Could not upload");
+        } finally {
+          busy = false;
+          render();
+        }
+      }
+
+      async function removePhoto(id) {
+        session.photos = session.photos.filter((p) => p.id !== id);
+        session.status = session.photos.length ? "capturing" : "waiting";
+        try {
+          await writeSession();
+        } catch (err) {
+          showError(err.message || "Could not remove photo");
+        }
+        render();
+      }
+
+      async function markDone() {
+        if (!session || !session.photos.length) return;
+        busy = true;
+        render();
+        try {
+          session.status = "ready";
+          await writeSession();
+          render();
+          if (!pollTimer) pollTimer = setInterval(() => void refreshSession(), 2000);
+        } catch (err) {
+          showError(err.message || "Could not continue");
+        } finally {
+          busy = false;
+          render();
+        }
+      }
+
+      document.getElementById("cameraBtn").onclick = () => document.getElementById("camera").click();
+      document.getElementById("uploadBtn").onclick = () => document.getElementById("library").click();
+      document.getElementById("camera").onchange = (e) => { uploadFiles(e.target.files); e.target.value = ""; };
+      document.getElementById("library").onchange = (e) => { uploadFiles(e.target.files); e.target.value = ""; };
+      document.getElementById("doneBtn").onclick = markDone;
+      document.getElementById("micBtn").onclick = toggleMic;
+      hintEl.oninput = scheduleHintSave;
+      load();
+    </script>
+  </body>
+</html>

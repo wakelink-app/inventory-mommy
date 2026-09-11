@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Add item</title>
+    <style>
+      :root {
+        --accent: #5b5ceb;
+        --accent-soft: #eef0ff;
+        --paper: #f5f6fa;
+        --card: #fff;
+        --ink: #1c1d21;
+        --muted: #6b7280;
+        --line: #e6e8ef;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+      }
+      main {
+        max-width: 28rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem calc(1.5rem + env(safe-area-inset-bottom));
+      }
+      .kicker {
+        margin: 0;
+        font-size: 0.72rem;
+        font-weight: 650;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 { margin: 0.35rem 0 0; font-size: 1.45rem; letter-spacing: -0.03em; }
+      .sub { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.92rem; }
+      .error {
+        margin-top: 0.9rem;
+        background: #fff1f1;
+        color: #b42318;
+        border-radius: 12px;
+        padding: 0.7rem 0.85rem;
+        font-size: 0.9rem;
+      }
+      .ok {
+        margin-top: 1.25rem;
+        background: #e7f8ef;
+        color: #087443;
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+        font-size: 0.9rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.5rem;
+        margin-top: 1rem;
+      }
+      .thumb {
+        position: relative;
+        aspect-ratio: 1;
+        overflow: hidden;
+        border-radius: 12px;
+        background: #eef0f4;
+      }
+      .thumb img { width: 100%; height: 100%; object-fit: cover; }
+      .thumb button {
+        position: absolute;
+        top: 0.3rem;
+        right: 0.3rem;
+        border: 0;
+        border-radius: 6px;
+        background: rgba(0,0,0,.6);
+        color: #fff;
+        width: 1.6rem;
+        height: 1.6rem;
+      }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 1rem; }
+      button.primary, button.secondary, textarea {
+        font: inherit;
+      }
+      button.primary, button.secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        height: 3.5rem;
+        width: 100%;
+        border-radius: 10px;
+        font-weight: 600;
+      }
+      button.primary {
+        border: 0;
+        background: var(--accent);
+        color: #fff;
+        margin-top: 1rem;
+      }
+      button.primary:disabled { opacity: 0.5; }
+      button.secondary {
+        border: 1px solid var(--line);
+        background: var(--card);
+        color: var(--ink);
+      }
+      textarea {
+        width: 100%;
+        min-height: 8rem;
+        margin-top: 1rem;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        padding: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="kicker">Add item</p>
+      <h1 id="title">Take photos</h1>
+      <p class="sub" id="sub">Up to 5 photos. Then press Done.</p>
+      <p class="error" id="error" hidden></p>
+      <div class="grid" id="grid"></div>
+      <div id="shoot">
+        <div class="row">
+          <button class="secondary" id="cameraBtn" type="button">Take photo</button>
+          <button class="secondary" id="uploadBtn" type="button">Upload</button>
+        </div>
+        <input id="camera" type="file" accept="image/*" capture="environment" hidden />
+        <input id="library" type="file" accept="image/*" multiple hidden />
+        <button class="primary" id="doneBtn" type="button">Done</button>
+      </div>
+      <div id="hintBox" hidden>
+        <textarea id="hint" placeholder="e.g. MacBook Air A2681 speaker, small scratch on the left"></textarea>
+        <button class="primary" id="saveHint" type="button">Save hint for the computer</button>
+        <p class="ok">Photos are in. On the computer, add any extra hint and press Generate.</p>
+      </div>
+      <p class="ok" id="readyMsg" hidden>Saved. Finish Generate on the computer.</p>
+    </main>
+    <script>
+      const token = new URLSearchParams(location.search).get("t") || "";
+      const sessionUrl = new URL("../sessions/" + encodeURIComponent(token) + ".json", location.href).toString();
+      const errorEl = document.getElementById("error");
+      const grid = document.getElementById("grid");
+      const shoot = document.getElementById("shoot");
+      const hintBox = document.getElementById("hintBox");
+      const title = document.getElementById("title");
+      const sub = document.getElementById("sub");
+      let session = null;
+      let busy = false;
+
+      function showError(msg) {
+        errorEl.hidden = !msg;
+        errorEl.textContent = msg || "";
+      }
+
+      function slotFor(id) {
+        return (session.slots || []).find((s) => s.id === id);
+      }
+
+      function render() {
+        const locked = session.status === "ready" || session.status === "generating" || session.status === "complete";
+        title.textContent = session.status === "complete" ? "Added to inventory" : locked ? "Tell AI about it" : "Take photos";
+        sub.textContent = session.status === "complete"
+          ? "The listing draft is ready on the computer."
+          : locked
+            ? "Add a hint if you want, then Generate on the computer."
+            : "Up to " + session.maxPhotos + " photos. Then press Done.";
+        shoot.hidden = locked;
+        hintBox.hidden = !locked || session.status === "complete";
+        document.getElementById("readyMsg").hidden = session.status !== "complete";
+        document.getElementById("doneBtn").disabled = busy || session.photos.length === 0;
+        document.getElementById("cameraBtn").disabled = busy || session.photos.length >= session.maxPhotos;
+        document.getElementById("uploadBtn").disabled = busy || session.photos.length >= session.maxPhotos;
+        document.getElementById("hint").value = session.hint || "";
+        grid.innerHTML = "";
+        for (const photo of session.photos) {
+          const wrap = document.createElement("div");
+          wrap.className = "thumb";
+          const img = document.createElement("img");
+          img.src = photo.preview || photo.url || "";
+          wrap.appendChild(img);
+          if (!locked) {
+            const x = document.createElement("button");
+            x.type = "button";
+            x.textContent = "×";
+            x.onclick = () => removePhoto(photo.id);
+            wrap.appendChild(x);
+          }
+          grid.appendChild(wrap);
+        }
+      }
+
+      async function writeSession() {
+        const payload = {
+          ...session,
+          photos: session.photos.map((p) => ({ id: p.id, path: p.path })),
+        };
+        const res = await fetch(session.sessionUploadUrl, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "x-upsert": "true" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error("Could not update session");
+      }
+
+      async function load() {
+        if (!token) {
+          showError("Missing session. Scan the QR code again.");
+          return;
+        }
+        const res = await fetch(sessionUrl + "?v=" + Date.now());
+        if (!res.ok) {
+          showError("Link expired or not found.");
+          return;
+        }
+        session = await res.json();
+        render();
+      }
+
+      async function uploadFiles(list) {
+        if (!list || !session || busy) return;
+        const files = Array.from(list).filter((f) => f.type.startsWith("image/") || f.type === "");
+        showError("");
+        busy = true;
+        render();
+        try {
+          for (const file of files) {
+            if (session.photos.length >= session.maxPhotos) break;
+            const used = new Set(session.photos.map((p) => p.id));
+            const slot = (session.slots || []).find((s) => !used.has(s.id));
+            if (!slot) break;
+            const put = await fetch(slot.uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" },
+              body: file,
+            });
+            if (!put.ok) throw new Error("Upload failed");
+            session.photos.push({
+              id: slot.id,
+              path: slot.path,
+              preview: URL.createObjectURL(file),
+            });
+            session.status = "capturing";
+            await writeSession();
+            render();
+          }
+        } catch (err) {
+          showError(err.message || "Could not upload");
+        } finally {
+          busy = false;
+          render();
+        }
+      }
+
+      async function removePhoto(id) {
+        session.photos = session.photos.filter((p) => p.id !== id);
+        session.status = session.photos.length ? "capturing" : "waiting";
+        try {
+          await writeSession();
+        } catch (err) {
+          showError(err.message || "Could not remove photo");
+        }
+        render();
+      }
+
+      async function markDone() {
+        if (!session.photos.length) return;
+        busy = true;
+        render();
+        try {
+          session.status = "ready";
+          await writeSession();
+        } catch (err) {
+          showError(err.message || "Could not continue");
+        } finally {
+          busy = false;
+          render();
+        }
+      }
+
+      async function saveHint() {
+        session.hint = document.getElementById("hint").value;
+        try {
+          await writeSession();
+        } catch (err) {
+          showError(err.message || "Could not save hint");
+        }
+      }
+
+      document.getElementById("cameraBtn").onclick = () => document.getElementById("camera").click();
+      document.getElementById("uploadBtn").onclick = () => document.getElementById("library").click();
+      document.getElementById("camera").onchange = (e) => { uploadFiles(e.target.files); e.target.value = ""; };
+      document.getElementById("library").onchange = (e) => { uploadFiles(e.target.files); e.target.value = ""; };
+      document.getElementById("doneBtn").onclick = markDone;
+      document.getElementById("saveHint").onclick = saveHint;
+      load();
+    </script>
+  </body>
+</html>
