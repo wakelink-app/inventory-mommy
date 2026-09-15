@@ -302,16 +302,18 @@ export function toEbayCondition(value: string | null | undefined): string {
   if (text.includes("part") || text.includes("not working") || text.includes("for_parts")) {
     return "FOR_PARTS_OR_NOT_WORKING";
   }
-  if (text === "new" || text.startsWith("new")) return "NEW";
+  if (text.includes("like new") || text.includes("excellent") || text === "new" || text.startsWith("new")) {
+    return "NEW";
+  }
   return "USED";
 }
 
 export function fromEbayCondition(value: string): string {
   const text = value.trim().toUpperCase().replace(/\s+/g, "_");
-  if (text === "NEW") return "New";
-  if (text === "FOR_PARTS_OR_NOT_WORKING") return "For parts";
-  if (text === "USED") return "Used - Good";
-  return value.trim() || "Used - Good";
+  if (text === "NEW") return "Like new";
+  if (text === "FOR_PARTS_OR_NOT_WORKING") return "Used";
+  if (text === "USED") return "Good";
+  return value.trim() || "Good";
 }
 
 export function serializeEbayDrafts(rows: EbayDraftRow[]): string {

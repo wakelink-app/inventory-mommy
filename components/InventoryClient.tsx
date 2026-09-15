@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, Layers, MoreVertical, Pencil, Printer, RefreshCw, Share2, Trash2, Upload, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { displaySku, isOffInventory, money } from "@/lib/format";
@@ -12,6 +12,14 @@ import {
   type InventorySeparation,
   type SeparationKind,
 } from "@/lib/inventory-separations";
+import {
+  CONDITION_TABS,
+  PRODUCT_KIND_TABS,
+  matchesConditionFilter,
+  matchesProductKind,
+  type ConditionFilter,
+  type ProductKind,
+} from "@/lib/inventory-kinds";
 import { StatusBadge } from "./StatusBadge";
 import { AddItemQrModal, type AddedInventoryItem } from "./AddItemQrModal";
 import { AssignBinBanner } from "./AssignBinBanner";
@@ -28,13 +36,13 @@ type ItemRow = {
   brand?: string | null;
   model: string | null;
   category?: string | null;
+  condition?: string | null;
+  notes?: string | null;
   status: string;
   locationLabel: string | null;
   photos: { url: string; isPrimary: boolean }[];
-  draft: { suggestedPrice: number | null; status: string } | null;
+  draft: { suggestedPrice: number | null; status: string; condition?: string | null } | null;
 };
-
-type ProductKind = "all" | "ipads" | "computers" | "watches" | "other";
 
 function matchesInventoryQuery(item: ItemRow, needle: string) {
   if (!needle) return true;
@@ -45,37 +53,9 @@ function matchesInventoryQuery(item: ItemRow, needle: string) {
   );
 }
 
-function itemProductKind(item: ItemRow): Exclude<ProductKind, "all"> {
-  const hay = [item.title, item.brand, item.model, item.category]
-    .map((value) => String(value ?? "").toLowerCase())
-    .join(" ");
-  if (hay.includes("ipad")) return "ipads";
-  if (hay.includes("apple watch") || /\b(watch|iwatch)\b/.test(hay)) return "watches";
-  if (
-    hay.includes("macbook") ||
-    hay.includes("imac") ||
-    hay.includes("mac mini") ||
-    hay.includes("mac pro") ||
-    hay.includes("mac studio") ||
-    hay.includes("computer") ||
-    hay.includes("laptop")
-  ) {
-    return "computers";
-  }
-  return "other";
-}
-
-function matchesProductKind(item: ItemRow, kind: ProductKind) {
-  if (kind === "all") return true;
-  return itemProductKind(item) === kind;
-}
-
-const SEPARATION_KIND_OPTIONS: { id: SeparationKind; label: string }[] = [
-  { id: "ipads", label: "iPads" },
-  { id: "computers", label: "Computers" },
-  { id: "watches", label: "Apple Watches" },
-  { id: "other", label: "Other" },
-];
+const SEPARATION_KIND_OPTIONS = PRODUCT_KIND_TABS.filter(
+  (tab): tab is { id: SeparationKind; label: string } => tab.id !== "all",
+);
 
 function defaultSeparationKind(kind: ProductKind): SeparationKind {
   return kind === "all" ? "other" : kind;
@@ -201,13 +181,15 @@ function useFilteredPresence<T extends { id: string }>(items: T[], instantKey: s
 export function InventoryClient({
   items,
   q,
-  tab,
-  kind,
+  tab: initialTab,
+  kind: initialKind,
+  condition: initialCondition,
 }: {
   items: ItemRow[];
   q: string;
   tab: string;
   kind: ProductKind;
+  condition: ConditionFilter;
 }) {
   const router = useRouter();
   const [created, setCreated] = useState<ItemRow[]>([]);
@@ -225,6 +207,9 @@ export function InventoryClient({
   const fileRef = useRef<HTMLInputElement>(null);
   const { notice, flash } = useDropBanner();
   const [query, setQuery] = useState(q);
+  const [tab, setTab] = useState(initialTab);
+  const [kind, setKind] = useState(initialKind);
+  const [condition, setCondition] = useState(initialCondition);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [swipeId, setSwipeId] = useState<string | null>(null);
   const [removedIds, setRemovedIds] = useState<string[]>([]);
@@ -249,13 +234,8 @@ export function InventoryClient({
   const menuRef = useRef<HTMLDivElement>(null);
   const [painting, setPainting] = useState(false);
   const pendingSeparationId = useRef<string | null>(null);
-  const kindTabs: { id: ProductKind; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "ipads", label: "iPads" },
-    { id: "computers", label: "Computers" },
-    { id: "watches", label: "Apple Watches" },
-    { id: "other", label: "Other" },
-  ];
+  const kindTabs = PRODUCT_KIND_TABS;
+  const conditionTabs = CONDITION_TABS;
   const tabs = [
     { id: "unlisted", label: "Unlisted" },
     { id: "listed", label: "Listed" },
@@ -295,6 +275,7 @@ export function InventoryClient({
         if (kind !== "all" && separatedIds.has(item.id)) return false;
         if (!matchesProductKind(item, kind)) return false;
       }
+      if (!matchesConditionFilter(item, condition)) return false;
       return matchesInventoryQuery(item, needle);
     });
   }, [
@@ -302,6 +283,7 @@ export function InventoryClient({
     activeSeparationIds,
     created,
     items,
+    condition,
     kind,
     query,
     removedIds,
@@ -312,7 +294,7 @@ export function InventoryClient({
   rowsRef.current = rows;
   const { shown, leaving, entering } = useFilteredPresence(
     rows,
-    `${tab}:${kind}:${activeSeparationId ?? "main"}:${removedIds.join("|")}`,
+    `${tab}:${kind}:${condition}:${activeSeparationId ?? "main"}:${removedIds.join("|")}`,
   );
 
   useEffect(() => {
@@ -741,16 +723,25 @@ export function InventoryClient({
     }
   }
 
-  function push(next: { q?: string; tab?: string; kind?: ProductKind }) {
-    const params = new URLSearchParams();
-    const nextQ = (next.q ?? query).trim();
+  function push(next: { q?: string; tab?: string; kind?: ProductKind; condition?: ConditionFilter }) {
+    const nextQ = next.q ?? query;
     const nextTab = next.tab ?? tab;
     const nextKind = next.kind ?? kind;
-    if (nextQ) params.set("q", nextQ);
+    const nextCondition = next.condition ?? condition;
+    if (next.tab != null) setTab(nextTab);
+    if (next.kind != null) setKind(nextKind);
+    if (next.condition != null) setCondition(nextCondition);
+    if (next.q != null) setQuery(nextQ);
+
+    const params = new URLSearchParams();
+    const trimmed = nextQ.trim();
+    if (trimmed) params.set("q", trimmed);
     if (nextTab === "listed" || nextTab === "unlisted") params.set("tab", nextTab);
     if (nextKind !== "all") params.set("kind", nextKind);
+    if (nextCondition !== "all") params.set("condition", nextCondition);
     const queryString = params.toString();
-    router.push(queryString ? `/inventory?${queryString}` : "/inventory?tab=unlisted");
+    const url = queryString ? `/inventory?${queryString}` : "/inventory?tab=unlisted";
+    window.history.replaceState(window.history.state, "", url);
   }
 
   async function startAdd() {
@@ -773,15 +764,11 @@ export function InventoryClient({
     (item: AddedInventoryItem) => {
       setCreated((current) => [item, ...current.filter((row) => row.id !== item.id)]);
       if (tab !== "unlisted") {
-        const params = new URLSearchParams();
-        params.set("tab", "unlisted");
-        if (kind !== "all") params.set("kind", kind);
-        router.push(`/inventory?${params.toString()}`);
-        return;
+        push({ tab: "unlisted" });
       }
       router.refresh();
     },
-    [kind, router, tab],
+    [router, tab],
   );
 
   async function markListed(item: ItemRow) {
@@ -996,12 +983,28 @@ export function InventoryClient({
       <div className="space-y-2">
         <div className="seg-tabs overflow-x-auto">
           {kindTabs.map((item) => (
+            <Fragment key={item.id}>
+              {item.id === "speakers" ? <span className="seg-tabs-split" aria-hidden /> : null}
+              <button
+                type="button"
+                onClick={() => push({ kind: item.id })}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${
+                  kind === item.id ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--muted)]"
+                }`}
+              >
+                {item.label}
+              </button>
+            </Fragment>
+          ))}
+        </div>
+        <div className="seg-tabs overflow-x-auto">
+          {conditionTabs.map((item) => (
             <button
               key={item.id}
               type="button"
-              onClick={() => push({ kind: item.id })}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
-                kind === item.id ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--muted)]"
+              onClick={() => push({ condition: item.id })}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap ${
+                condition === item.id ? "bg-[var(--card)] text-[var(--ink)] shadow-sm" : "text-[var(--muted)]"
               }`}
             >
               {item.label}

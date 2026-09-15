@@ -50,7 +50,7 @@ function partPricingInput(line: PartSheetLine, sheet: PartSheet) {
       partType: line.partType || line.title,
       title: line.title,
       searchQuery: searchQueries[0] || line.title,
-      condition: line.condition || "Used - Good",
+      condition: line.condition || "Good",
       modelNumbers: context.modelNumbers,
     },
     searchQueries,

@@ -1,4 +1,6 @@
-export type SeparationKind = "ipads" | "computers" | "watches" | "other";
+import { PRODUCT_KIND_TABS, type ProductKindId } from "./inventory-kinds";
+
+export type SeparationKind = ProductKindId;
 
 export type InventorySeparation = {
   id: string;
@@ -8,7 +10,9 @@ export type InventorySeparation = {
 };
 
 const STORAGE_KEY = "parts-mommy:inventory-separations";
-const KIND_SET = new Set<SeparationKind>(["ipads", "computers", "watches", "other"]);
+const KIND_SET = new Set<SeparationKind>(
+  PRODUCT_KIND_TABS.filter((tab) => tab.id !== "all").map((tab) => tab.id as SeparationKind),
+);
 
 const IPAD_SEPARATION_NAMES = new Set(
   [

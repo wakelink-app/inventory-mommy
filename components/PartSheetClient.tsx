@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Download, Globe, ImageIcon, Link2, Loader2, Tags, Trash2, Upload, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { money } from "@/lib/format";
+import { LISTING_CONDITION_OPTIONS, normalizeListingCondition } from "@/lib/inventory-kinds";
 
 export type PartSheetData = {
   id: string;
@@ -819,12 +820,17 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
                 onChange={(e) => updateLine(line.id, { description: e.target.value })}
               />
               <div className="grid gap-3 sm:grid-cols-2">
-                <input
+                <select
                   className="field text-sm"
-                  value={line.condition ?? ""}
-                  placeholder="Condition"
+                  value={normalizeListingCondition(line.condition)}
                   onChange={(e) => updateLine(line.id, { condition: e.target.value })}
-                />
+                >
+                  {LISTING_CONDITION_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
                 <input
                   className="field text-sm"
                   type="number"

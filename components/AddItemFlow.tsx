@@ -6,6 +6,7 @@ import { Camera, Check, Images, Loader2, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { money } from "@/lib/format";
 import { LocationPicker } from "./LocationPicker";
+import { LISTING_CONDITION_OPTIONS, normalizeListingCondition } from "@/lib/inventory-kinds";
 import type {
   IdentifyResult,
   LocationNode,
@@ -70,7 +71,7 @@ export function AddItemFlow() {
       setTitle(identified.identify.title);
       setBrand(identified.identify.brand);
       setModel(identified.identify.model || identified.identify.modelNumber);
-      setCondition(identified.identify.condition);
+      setCondition(normalizeListingCondition(identified.identify.condition));
       setCategory(identified.identify.category);
       setBusy("Estimating price…");
       const researched = await api<{ research: ResearchResult; location: LocationSuggestion }>(
@@ -221,7 +222,17 @@ export function AddItemFlow() {
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-[var(--muted)]">Condition</span>
-              <input className="field" value={condition} onChange={(e) => setCondition(e.target.value)} />
+              <select
+                className="field"
+                value={condition || "Good"}
+                onChange={(e) => setCondition(e.target.value)}
+              >
+                {LISTING_CONDITION_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-sm">
               <span className="mb-1 block text-[var(--muted)]">Part type</span>

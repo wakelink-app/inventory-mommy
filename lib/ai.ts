@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { DevicePartsAnalysis, IdentifyResult, PriceEstimate } from "./types";
 import { getOpenAiKey } from "./secrets";
+import { normalizeListingCondition } from "./inventory-kinds";
 
 async function client() {
   const key = await getOpenAiKey();
@@ -22,7 +23,11 @@ Return JSON only with these keys:
 - model
 - modelNumber: visible SKU, model number, or ""
 - partType: short part/product type, e.g. "Speaker Set", "Logic Board", "Laptop"
-- condition: one of "New", "Open box", "Used - Excellent", "Used - Good", "Used - Fair", "For parts"
+- condition: grade wear from the photos as exactly one of "Like new", "Good", or "Used"
+  - Like new: unused, open box, or barely used; little to no wear, clean screen, no dents or obvious scratches
+  - Good: normal used wear, still presentable, light scuffs or scratches
+  - Used: heavier wear, marks, cracks, missing pieces, or for parts
+  Look at housing, screen, ports, and corners. If you cannot tell, choose Good.
 - category: eBay-style category
 - searchQuery: short marketplace search query
 - description: 2-4 factual sentences from the photos/hint
@@ -72,7 +77,7 @@ export async function identifyFromPhotos(
     model: parsed.model?.trim() || "",
     modelNumber: parsed.modelNumber?.trim() || "",
     partType: parsed.partType?.trim() || parsed.category?.trim() || "",
-    condition: parsed.condition?.trim() || "Used - Good",
+    condition: normalizeListingCondition(parsed.condition, "Good"),
     category: parsed.category?.trim() || "",
     searchQuery:
       parsed.searchQuery?.trim() ||
@@ -134,7 +139,7 @@ Return JSON only with this shape:
       "partType": "LCD Screen Assembly",
       "title": "eBay title max 80 chars",
       "description": "2-4 factual sentences for the listing",
-      "condition": "Used - Good | For parts | New | etc",
+      "condition": "Like new | Good | Used",
       "categoryName": "eBay-style category",
       "searchQuery": "short eBay search query for this exact part"
     }
@@ -145,6 +150,7 @@ Rules:
 - Do NOT guess prices — leave suggestedPrice, priceLow, and priceHigh out (pricing comes from live market search).
 - searchQuery must be specific enough to find this part on eBay (brand, model, part name).
 - Titles must be marketplace-ready and ≤80 characters.
+- Grade each part condition as exactly "Like new", "Good", or "Used" from the photos.
 - If only one device is visible, still list typical high-value parts for that model.
 - If a scanned inventory item is provided, that record is the exact device being analyzed — use its model number and title. The box label is only storage location and may describe many different models mixed together.
 - Never pick a model number from the box label alone when photos or a scanned item conflict with it.
@@ -263,7 +269,7 @@ export async function analyzeDevicePartsFromPhotos(
     partType: String(part.partType ?? part.title ?? `Part ${index + 1}`).trim(),
     title: String(part.title ?? "Unknown part").trim().slice(0, 80),
     description: String(part.description ?? "").trim(),
-    condition: String(part.condition ?? "Used - Good").trim(),
+    condition: normalizeListingCondition(part.condition, "Good"),
     suggestedPrice: null,
     priceLow: null,
     priceHigh: null,

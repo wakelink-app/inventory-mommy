@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw, Sparkles } from "lucide-react";
 import { api } from "@/lib/client";
 import { displaySku, money, statusLabel } from "@/lib/format";
+import { LISTING_CONDITION_OPTIONS, normalizeListingCondition } from "@/lib/inventory-kinds";
 import { CopyButton } from "./CopyButton";
 import { DropBanner, useDropBanner } from "./DropBanner";
 import { LocationPicker } from "./LocationPicker";
@@ -179,40 +180,58 @@ export function ItemDetail({
             {facts.map(([label, value]) => (
               <div key={label}>
                 <p className="text-xs text-[var(--muted)]">{label}</p>
-                <p className="mt-0.5 font-medium">
-                  {label === "Bin" ? (
-                    item.locationLabel ? (
-                      <span className="inline-flex min-w-0 items-center gap-1">
+                {label === "Condition" ? (
+                  <select
+                    className="field mt-0.5 py-1"
+                    value={normalizeListingCondition(item.condition)}
+                    onChange={(e) => {
+                      const condition = e.target.value;
+                      setItem({ ...item, condition });
+                      save({ condition });
+                    }}
+                  >
+                    {LISTING_CONDITION_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="mt-0.5 font-medium">
+                    {label === "Bin" ? (
+                      item.locationLabel ? (
+                        <span className="inline-flex min-w-0 items-center gap-1">
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-md p-1 text-[var(--muted)] hover:bg-[var(--wash)] hover:text-[var(--ink)]"
+                            aria-label="Reassign bin"
+                            title="Reassign bin"
+                            onClick={() => setAssignOpen(true)}
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="min-w-0 text-left font-medium text-[var(--accent)]"
+                            onClick={() => flash(item.locationLabel!)}
+                          >
+                            {item.locationLabel}
+                          </button>
+                        </span>
+                      ) : (
                         <button
                           type="button"
-                          className="shrink-0 rounded-md p-1 text-[var(--muted)] hover:bg-[var(--wash)] hover:text-[var(--ink)]"
-                          aria-label="Reassign bin"
-                          title="Reassign bin"
+                          className="font-medium text-[var(--accent)]"
                           onClick={() => setAssignOpen(true)}
                         >
-                          <RefreshCw size={14} />
+                          Assign bin
                         </button>
-                        <button
-                          type="button"
-                          className="min-w-0 text-left font-medium text-[var(--accent)]"
-                          onClick={() => flash(item.locationLabel!)}
-                        >
-                          {item.locationLabel}
-                        </button>
-                      </span>
+                      )
                     ) : (
-                      <button
-                        type="button"
-                        className="font-medium text-[var(--accent)]"
-                        onClick={() => setAssignOpen(true)}
-                      >
-                        Assign bin
-                      </button>
-                    )
-                  ) : (
-                    value
-                  )}
-                </p>
+                      value
+                    )}
+                  </p>
+                )}
               </div>
             ))}
           </section>

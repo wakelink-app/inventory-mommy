@@ -1140,6 +1140,15 @@ table.data tr:last-child td {
   padding: 4px;
 }
 
+.seg-tabs-split {
+  align-self: stretch;
+  width: 1px;
+  flex: 0 0 1px;
+  margin: 3px 6px;
+  background: var(--line);
+  border-radius: 1px;
+}
+
 @keyframes drop-banner {
   0% {
     transform: translateY(-140%);
