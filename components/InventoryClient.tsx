@@ -4,7 +4,7 @@ import { Download, Layers, MoreVertical, Pencil, Printer, RefreshCw, Share2, Tra
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { displaySku, isOffInventory, money } from "@/lib/format";
+import { displaySku, isOffInventory, itemCopyCount, money } from "@/lib/format";
 import { api } from "@/lib/client";
 import {
   loadInventorySeparations,
@@ -38,6 +38,7 @@ type ItemRow = {
   category?: string | null;
   condition?: string | null;
   notes?: string | null;
+  quantity?: number | null;
   status: string;
   locationLabel: string | null;
   photos: { url: string; isPrimary: boolean }[];
@@ -344,6 +345,10 @@ export function InventoryClient({
   const selectedRows = rows.filter((item) => selectedIds.includes(item.id));
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
+  const selectedPrintCount = selectedRows.reduce(
+    (sum, item) => sum + itemCopyCount(item.quantity),
+    0,
+  );
 
   useEffect(() => {
     if (allCheckRef.current) {
@@ -963,7 +968,7 @@ export function InventoryClient({
                 disabled={printBusy || deleteBusy || sendBusy}
               >
                 <Printer size={16} />
-                {printBusy ? "Opening…" : `Print ${selectedRows.length} label${selectedRows.length === 1 ? "" : "s"}`}
+                {printBusy ? "Opening…" : `Print ${selectedPrintCount} label${selectedPrintCount === 1 ? "" : "s"}`}
               </button>
               <button
                 type="button"

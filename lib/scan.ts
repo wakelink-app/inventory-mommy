@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { flattenLocations, listLocationTree, locationLabel } from "./locations";
-import { displaySku } from "./format";
+import { baseProductSku, displaySku } from "./format";
 import { itemInclude, locationLabelsFor, serializeItem } from "./catalog";
 import { findPartSheetForScannedItem } from "./part-sheet";
 
@@ -28,15 +28,19 @@ export async function findItemByScan(code: string, userId: string) {
   if (byId) return byId;
 
   const upper = raw.toUpperCase();
+  const root = baseProductSku(upper);
   const candidates = await prisma.item.findMany({
     where: {
       userId,
-      OR: [{ sku: raw }, { sku: { equals: raw } }],
+      OR: [{ sku: raw }, { sku: root }, { sku: { equals: raw } }, { sku: { equals: root } }],
     },
     include: itemInclude,
     take: 50,
   });
-  const bySkuExact = candidates.filter((item) => (item.sku ?? "").toUpperCase() === upper);
+  const bySkuExact = candidates.filter((item) => {
+    const sku = (item.sku ?? "").toUpperCase();
+    return sku === upper || sku === root;
+  });
   if (bySkuExact.length > 0) {
     return (
       bySkuExact.find((item) => !item.locationId) ??
@@ -49,10 +53,11 @@ export async function findItemByScan(code: string, userId: string) {
     include: itemInclude,
     take: 500,
   });
-  const matches = items.filter(
-    (item) =>
-      displaySku(item).toUpperCase() === upper || item.sku?.toUpperCase() === upper,
-  );
+  const matches = items.filter((item) => {
+    const sku = (item.sku ?? "").toUpperCase();
+    const shown = displaySku(item).toUpperCase();
+    return sku === upper || sku === root || shown === upper || shown === root;
+  });
   if (matches.length === 0) return null;
   return matches.find((item) => !item.locationId) ?? matches.sort((a, b) => b.quantity - a.quantity)[0];
 }

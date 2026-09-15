@@ -75,7 +75,14 @@ export async function PATCH(request: Request, context: RouteContext) {
         ...(typeof body.notes === "string" ? { notes: body.notes || null } : {}),
         ...(typeof body.status === "string" ? { status: body.status } : {}),
         ...(locationId !== undefined ? { locationId } : {}),
-        ...(typeof body.quantity === "number" ? { quantity: Math.max(1, body.quantity) } : {}),
+        ...(typeof body.quantity === "number" || typeof body.quantity === "string"
+          ? {
+              quantity: Math.max(
+                1,
+                Math.min(99, Math.floor(Number(body.quantity)) || 1),
+              ),
+            }
+          : {}),
       },
     });
 

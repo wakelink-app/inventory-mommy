@@ -65,3 +65,19 @@ export function nextOrderStatus(status: string): "packaged" | "shipped" | null {
 export function displaySku(item: { id: string; sku?: string | null }): string {
   return item.sku || `P${item.id.slice(-4).toUpperCase()}`;
 }
+
+export function itemCopyCount(quantity?: number | string | null) {
+  const n = Math.floor(Number(quantity));
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.min(99, n);
+}
+
+export function baseProductSku(sku: string) {
+  return sku.trim().replace(/\.\d+$/, "");
+}
+
+export function productCopySku(sku: string, copyIndex: number) {
+  const root = baseProductSku(sku);
+  if (copyIndex <= 1) return root;
+  return `${root}.${copyIndex}`;
+}

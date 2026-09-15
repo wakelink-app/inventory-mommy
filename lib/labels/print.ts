@@ -3,6 +3,7 @@ import { toLabelPayload } from "./payload";
 import { LABEL_HEIGHT_IN, LABEL_WIDTH_IN } from "./size";
 import type { LabelPayload } from "./types";
 import type { ProductLabelItem } from "@/lib/label";
+import { baseProductSku, displaySku, itemCopyCount, productCopySku } from "@/lib/format";
 
 function escapeHtml(value: string) {
   return value
@@ -173,5 +174,15 @@ export async function printLabelPayloads(payloads: LabelPayload[]) {
 }
 
 export async function printLabels(items: ProductLabelItem[]) {
-  await printLabelPayloads(items.map(toLabelPayload));
+  const payloads = items.flatMap((item) => {
+    const count = itemCopyCount(item.quantity);
+    const root = baseProductSku(displaySku(item));
+    return Array.from({ length: count }, (_, index) =>
+      toLabelPayload({
+        ...item,
+        sku: productCopySku(root, index + 1),
+      }),
+    );
+  });
+  await printLabelPayloads(payloads);
 }

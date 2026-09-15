@@ -6,6 +6,7 @@ export type ProductLabelItem = {
   title: string;
   model?: string | null;
   locationLabel?: string | null;
+  quantity?: number | null;
   photos: { url: string; isPrimary?: boolean }[];
 };
 

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/client";
-import { displaySku } from "@/lib/format";
+import { baseProductSku, displaySku } from "@/lib/format";
 import { playBinErr, playBinOk, preloadBinSounds } from "@/lib/sounds";
 import { DropBanner, useDropBanner } from "./DropBanner";
 
@@ -29,7 +29,9 @@ type AssignedItem = {
 
 function isSameProduct(code: string, item: ScannedItem) {
   const raw = code.replace(/^(ITEM|SKU)[:#]\s*/i, "").trim();
-  return raw.toUpperCase() === displaySku(item).toUpperCase() || raw === item.id;
+  const sku = displaySku(item).toUpperCase();
+  const scanned = raw.toUpperCase();
+  return scanned === sku || baseProductSku(scanned) === sku || raw === item.id;
 }
 
 async function scanProduct(code: string) {

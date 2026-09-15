@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, Sparkles } from "lucide-react";
 import { api } from "@/lib/client";
-import { displaySku, money, statusLabel } from "@/lib/format";
+import { displaySku, itemCopyCount, money, statusLabel } from "@/lib/format";
 import { LISTING_CONDITION_OPTIONS, normalizeListingCondition } from "@/lib/inventory-kinds";
 import { CopyButton } from "./CopyButton";
 import { DropBanner, useDropBanner } from "./DropBanner";
@@ -60,6 +60,7 @@ export function ItemDetail({
   const [assignOpen, setAssignOpen] = useState(false);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
   const { notice, flash } = useDropBanner();
+  const [qtyText, setQtyText] = useState(String(item.quantity || 1));
 
   async function save(patch: Record<string, unknown>) {
     setSaving(true);
@@ -71,6 +72,7 @@ export function ItemDetail({
         body: JSON.stringify(patch),
       });
       setItem(data.item);
+      setQtyText(String(data.item.quantity || 1));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -93,6 +95,14 @@ export function ItemDetail({
     if (!confirm("Delete this item?")) return;
     await api(`/api/items/${item.id}`, { method: "DELETE" });
     router.push("/inventory");
+  }
+
+  function commitQuantity(raw: string | number) {
+    const quantity = itemCopyCount(raw);
+    setQtyText(String(quantity));
+    if (quantity === item.quantity) return;
+    setItem({ ...item, quantity });
+    void save({ quantity });
   }
 
   const listing = [
@@ -196,6 +206,36 @@ export function ItemDetail({
                       </option>
                     ))}
                   </select>
+                ) : label === "Qty" ? (
+                  <div className="mt-0.5 flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1 text-base text-[var(--muted)] hover:bg-[var(--wash)] hover:text-[var(--ink)]"
+                      aria-label="Decrease quantity"
+                      onClick={() => commitQuantity(item.quantity - 1)}
+                    >
+                      −
+                    </button>
+                    <input
+                      className="field w-14 py-1 text-center"
+                      inputMode="numeric"
+                      value={qtyText}
+                      aria-label="Quantity"
+                      onChange={(e) => setQtyText(e.target.value.replace(/\D/g, ""))}
+                      onBlur={() => commitQuantity(qtyText)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="rounded-md px-2 py-1 text-base text-[var(--muted)] hover:bg-[var(--wash)] hover:text-[var(--ink)]"
+                      aria-label="Increase quantity"
+                      onClick={() => commitQuantity(item.quantity + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
                 ) : (
                   <p className="mt-0.5 font-medium">
                     {label === "Bin" ? (

@@ -6,6 +6,7 @@ import { barcodeSvg } from "@/lib/barcode";
 import { toLabelPayload } from "@/lib/labels/payload";
 import { printLabels } from "@/lib/labels/print";
 import type { ProductLabelItem } from "@/lib/label";
+import { itemCopyCount } from "@/lib/format";
 
 export async function printProductLabel(item: ProductLabelItem) {
   await printLabels([item]);
@@ -57,7 +58,9 @@ export function PrintProductLabelButton({
     <span className="inline-flex flex-col items-start">
       <button type="button" className={className} onClick={() => void print()}>
         <Printer size={16} />
-        Print label
+        {itemCopyCount(item.quantity) > 1
+          ? `Print ${itemCopyCount(item.quantity)} labels`
+          : "Print label"}
       </button>
       {error ? <span className="mt-1 text-xs text-[#b42318]">{error}</span> : null}
     </span>
@@ -103,7 +106,7 @@ export function PrintProductLabelModal({
         <div className="mt-4 flex flex-wrap gap-2">
           <button type="button" className="btn-primary" onClick={() => void print()} disabled={busy}>
             <Printer size={16} />
-            {busy ? "Opening…" : "Print label"}
+            {busy ? "Opening…" : itemCopyCount(item.quantity) > 1 ? `Print ${itemCopyCount(item.quantity)} labels` : "Print label"}
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>
             Done
