@@ -61,9 +61,7 @@ function getPrisma(): PrismaClient {
   }
 
   const next = createPrisma();
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = next;
-  }
+  globalForPrisma.prisma = next;
   return next;
 }
 
