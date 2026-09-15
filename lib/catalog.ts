@@ -1,6 +1,9 @@
 import { prisma } from "./prisma";
 import { listLocationTree, locationLabel } from "./locations";
+import { ensureAppleWatchSkus } from "./sku";
 import { photoUrl } from "./uploads";
+
+export { nextSku } from "./sku";
 
 export const itemInclude = {
   photos: { orderBy: { createdAt: "asc" as const } },
@@ -44,6 +47,7 @@ export async function getInventory(
   },
   userId: string,
 ) {
+  await ensureAppleWatchSkus(userId);
   const q = filters.q?.trim() ?? "";
   const status = filters.status?.trim() ?? "";
   const locationId = filters.locationId?.trim() ?? "";
@@ -99,6 +103,7 @@ export async function getInventory(
 }
 
 export async function getItemById(id: string, userId: string) {
+  await ensureAppleWatchSkus(userId);
   const item = await prisma.item.findFirst({
     where: { id, userId },
     include: itemInclude,
@@ -106,19 +111,6 @@ export async function getItemById(id: string, userId: string) {
   if (!item) return null;
   const labels = await locationLabelsFor([item.locationId], userId);
   return serializeItem(item, labels);
-}
-
-export async function nextSku(userId: string): Promise<string> {
-  const items = await prisma.item.findMany({
-    where: { userId, sku: { startsWith: "P" } },
-    select: { sku: true },
-  });
-  let max = 0;
-  for (const item of items) {
-    const match = item.sku?.match(/^P(\d+)$/);
-    if (match) max = Math.max(max, Number(match[1]));
-  }
-  return `P${String(max + 1).padStart(4, "0")}`;
 }
 
 export async function getDashboard(userId: string) {

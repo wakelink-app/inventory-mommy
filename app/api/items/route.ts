@@ -70,7 +70,7 @@ export async function POST(request: Request) {
 
   const item = await prisma.item.create({
     data: {
-      sku: await nextSku(userId),
+      sku: await nextSku(userId, { title, brand, model, category, notes }),
       title,
       brand,
       model,

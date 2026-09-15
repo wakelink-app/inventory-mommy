@@ -1,8 +1,8 @@
 import OpenAI from "openai";
 import type { DevicePartAnalysis, IdentifyResult, MarketComp } from "./types";
-import { withTimeout } from "./async-pool";
+import { mapPool, withTimeout } from "./async-pool";
 import { isEbayImageUrl } from "./image-url";
-import { isRelevantPartComp, searchPartCompsAcrossWeb } from "./market-search-api";
+import { isEbayComp, isRelevantPartComp, searchPartCompsAcrossWeb } from "./market-search-api";
 import { parseModelJson } from "./parse-model-json";
 import { getOpenAiKey } from "./secrets";
 
@@ -20,8 +20,9 @@ export type PartMarketPrice = {
 const UNDERCUT_USD = 1;
 const MIN_PRICE = 0.99;
 const BATCH_SIZE = 3;
-const MAX_RETRY_QUERIES = 3;
-const OPENAI_TIMEOUT_MS = 45_000;
+const MAX_RETRY_QUERIES = 2;
+const PRICE_CONCURRENCY = 4;
+const OPENAI_TIMEOUT_MS = 20_000;
 
 function roundPrice(value: number) {
   return Math.round(value * 100) / 100;
@@ -47,10 +48,6 @@ function emptyPrice(note: string): PartMarketPrice {
     priceAltSourceUrl: null,
     priceAltSource: null,
   };
-}
-
-function isEbayComp(comp: MarketComp) {
-  return /ebay/i.test(comp.source) || Boolean(comp.url && /ebay\.com/i.test(comp.url));
 }
 
 function finalizePartPrice(
@@ -113,23 +110,47 @@ export type PartPricingRequest = {
 async function pricePartViaSerpApi(
   item: PartPricingRequest,
 ): Promise<(PartMarketPrice & { searchQuery: string }) | null> {
-  let fallback: (PartMarketPrice & { searchQuery: string }) | null = null;
-
   for (const query of item.searchQueries.slice(0, MAX_RETRY_QUERIES)) {
-    const comps = await searchPartCompsAcrossWeb(query, item.part);
+    const comps = await searchPartCompsAcrossWeb(query, item.part, { engines: "fast" });
     if (comps.length === 0) continue;
     const priced = finalizePartPrice(
       comps,
       item.part,
-      `Searched eBay, Amazon, Google Shopping, and the web for "${query}".`,
+      `Searched eBay and Google Shopping for "${query}".`,
     );
     if (priced.suggestedPrice == null) continue;
-    const result = { ...priced, searchQuery: query };
-    if (pricingHasEbayAndAlt(priced.comps)) return result;
-    if (!fallback) fallback = result;
+    return { ...priced, searchQuery: query };
   }
 
-  return fallback;
+  return null;
+}
+
+async function pricePartViaOtherWebsites(
+  item: PartPricingRequest,
+): Promise<(PartMarketPrice & { searchQuery: string }) | null> {
+  for (const query of item.searchQueries.slice(0, MAX_RETRY_QUERIES)) {
+    const comps = await searchPartCompsAcrossWeb(query, item.part, { engines: "other" });
+    if (comps.length === 0) continue;
+    const priced = finalizePartPrice(
+      comps,
+      item.part,
+      `Searched Amazon, Google Shopping, and other sites (not eBay) for "${query}".`,
+    );
+    if (priced.suggestedPrice == null) continue;
+    return { ...priced, searchQuery: query };
+  }
+  return null;
+}
+
+export async function pricePartFromOtherWebsites(
+  item: PartPricingRequest,
+): Promise<PartMarketPrice & { searchQuery: string }> {
+  const priced = await pricePartViaOtherWebsites(item);
+  if (priced) return priced;
+  return {
+    ...emptyPrice("No non-eBay part listings found. Try another search or enter a price."),
+    searchQuery: item.searchQueries[0] || item.part.searchQuery || item.part.title,
+  };
 }
 
 async function openaiClient() {
@@ -299,38 +320,42 @@ export async function pricePartsFromMarket(
 
 export async function pricePartsFromMarketWithRetries(
   items: PartPricingRequest[],
+  options?: { openaiFallback?: boolean },
 ): Promise<Array<PartMarketPrice & { searchQuery: string }>> {
   if (items.length === 0) return [];
 
-  const results: Array<PartMarketPrice & { searchQuery: string }> = [];
+  const results = await mapPool(items, PRICE_CONCURRENCY, async (item) => {
+    const serpResult = await pricePartViaSerpApi({
+      ...item,
+      searchQueries: item.searchQueries.slice(0, MAX_RETRY_QUERIES),
+    });
+    if (serpResult?.suggestedPrice != null) return serpResult;
+    return {
+      ...emptyPrice("Could not find part-only listings."),
+      searchQuery: item.searchQueries[0] || item.part.searchQuery || item.part.title,
+    };
+  });
 
-  for (const item of items) {
-    let found: (PartMarketPrice & { searchQuery: string }) | null = null;
+  if (!options?.openaiFallback) return results;
 
-    for (const query of item.searchQueries.slice(0, MAX_RETRY_QUERIES)) {
-      const serpResult = await pricePartViaSerpApi({ ...item, searchQueries: [query] });
-      if (serpResult?.suggestedPrice != null) {
-        found = serpResult;
-        break;
-      }
-    }
+  const missing = results
+    .map((result, index) => ({ result, item: items[index], index }))
+    .filter(({ result }) => result.suggestedPrice == null);
+  if (missing.length === 0) return results;
 
-    if (!found) {
-      for (const query of item.searchQueries.slice(0, MAX_RETRY_QUERIES)) {
-        const [openAiResult] = await pricePartsFromMarket([{ ...item.part, searchQuery: query }]);
-        if (openAiResult?.suggestedPrice != null) {
-          found = { ...openAiResult, searchQuery: query };
-          break;
-        }
-      }
-    }
-
-    results.push(
-      found ?? {
-        ...emptyPrice("Could not find part-only listings."),
-        searchQuery: item.searchQueries[0] || item.part.searchQuery || item.part.title,
-      },
-    );
+  const fallback = await pricePartsFromMarket(
+    missing.map(({ item }) => ({
+      ...item.part,
+      searchQuery: item.searchQueries[0] || item.part.searchQuery,
+    })),
+  );
+  for (let i = 0; i < missing.length; i += 1) {
+    const priced = fallback[i];
+    if (priced?.suggestedPrice == null) continue;
+    results[missing[i].index] = {
+      ...priced,
+      searchQuery: missing[i].item.searchQueries[0] || missing[i].item.part.searchQuery || missing[i].item.part.title,
+    };
   }
 
   return results;

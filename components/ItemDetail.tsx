@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Sparkles } from "lucide-react";
 import { api } from "@/lib/client";
 import { displaySku, money, statusLabel } from "@/lib/format";
 import { CopyButton } from "./CopyButton";
@@ -11,6 +11,7 @@ import { LocationPicker } from "./LocationPicker";
 import { StatusBadge } from "./StatusBadge";
 import { AssignBinBanner } from "./AssignBinBanner";
 import { PrintProductLabelButton } from "./ProductLabel";
+import { AnalyzeProductModal } from "./AnalyzeProductModal";
 import type { LocationNode } from "@/lib/types";
 
 type ItemDetailData = {
@@ -44,9 +45,11 @@ type ItemDetailData = {
 export function ItemDetail({
   initialItem,
   initialTree,
+  analyzedPartSheet = null,
 }: {
   initialItem: ItemDetailData;
   initialTree: LocationNode[];
+  analyzedPartSheet?: { id: string; code: string; masterTitle: string } | null;
 }) {
   const router = useRouter();
   const [item, setItem] = useState(initialItem);
@@ -54,6 +57,7 @@ export function ItemDetail({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [analyzeOpen, setAnalyzeOpen] = useState(false);
   const { notice, flash } = useDropBanner();
 
   async function save(patch: Record<string, unknown>) {
@@ -119,8 +123,22 @@ export function ItemDetail({
             {displaySku(item)}
           </p>
           <h1 className="page-title mt-1 break-words">{item.title}</h1>
-          <div className="mt-3">
+          <div className="mt-3 flex flex-wrap gap-2">
             <PrintProductLabelButton item={item} />
+            <button
+              type="button"
+              className={analyzedPartSheet ? "btn-secondary" : "btn-primary"}
+              onClick={() => {
+                if (analyzedPartSheet) {
+                  router.push(`/part-sheets/${analyzedPartSheet.id}`);
+                  return;
+                }
+                setAnalyzeOpen(true);
+              }}
+            >
+              <Sparkles size={16} strokeWidth={1.75} />
+              {analyzedPartSheet ? "View analysis" : "Analyze product"}
+            </button>
           </div>
         </div>
         <StatusBadge status={item.status} draftStatus={item.draft?.status} />
@@ -247,6 +265,22 @@ export function ItemDetail({
           </div>
         </div>
       </div>
+      {analyzeOpen && !analyzedPartSheet && (
+        <AnalyzeProductModal
+          location={{
+            id: item.locationId ?? "",
+            name: item.title,
+            label: item.locationLabel ?? item.title,
+          }}
+          itemId={item.id}
+          product={{
+            title: item.title,
+            model: item.model,
+            locationLabel: item.locationLabel,
+          }}
+          onClose={() => setAnalyzeOpen(false)}
+        />
+      )}
       {assignOpen && (
         <AssignBinBanner
           verifyProduct

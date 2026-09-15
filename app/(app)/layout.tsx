@@ -1,23 +1,23 @@
 import type { ReactNode } from "react";
+import { AppContent, AppNavigation, NavProgress } from "@/components/AppNavigation";
 import { Sidebar } from "@/components/Sidebar";
 import { TitleBar } from "@/components/TitleBar";
-import { requirePageAuth } from "@/lib/auth";
 
-export const dynamic = "force-dynamic";
-
-export default async function AppShellLayout({
+export default function AppShellLayout({
   children,
 }: {
   children: ReactNode;
 }) {
-  await requirePageAuth();
   return (
-    <div className="app-frame">
-      <Sidebar />
-      <div className="app-pane">
-        <TitleBar />
-        <main className="app-content">{children}</main>
+    <AppNavigation>
+      <div className="app-frame">
+        <NavProgress />
+        <Sidebar />
+        <div className="app-pane">
+          <TitleBar />
+          <AppContent>{children}</AppContent>
+        </div>
       </div>
-    </div>
+    </AppNavigation>
   );
 }

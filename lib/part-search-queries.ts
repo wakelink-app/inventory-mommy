@@ -26,6 +26,13 @@ function uniqueQueries(queries: string[]) {
   return out;
 }
 
+function isWatchContext(sheet: PartSheetContext, title: string) {
+  const hay = [sheet.masterTitle, sheet.masterModel, sheet.masterBrand, title]
+    .map((value) => String(value ?? "").toLowerCase())
+    .join(" ");
+  return hay.includes("apple watch") || hay.includes("watch series") || /\b(iwatch|watch)\b/.test(hay);
+}
+
 function deviceHints(sheet: PartSheetContext, title: string) {
   const master = [sheet.masterTitle, sheet.masterModel].filter(Boolean).join(" ");
   const blob = `${title} ${master}`;
@@ -35,20 +42,48 @@ function deviceHints(sheet: PartSheetContext, title: string) {
   const deviceName =
     sheet.masterTitle?.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim() ||
     [brand, sheet.masterModel].filter(Boolean).join(" ");
+  const watch = isWatchContext(sheet, title);
 
-  return { modelNum, gen, brand, deviceName };
+  return { modelNum, gen, brand, deviceName, watch };
 }
 
 export function buildPartSearchQueries(line: PartLine, sheet: PartSheetContext): string[] {
   const partType = (line.partType || "").trim();
   const title = line.title.trim();
-  const { modelNum, gen, brand, deviceName } = deviceHints(sheet, title);
+  const { modelNum, gen, brand, deviceName, watch } = deviceHints(sheet, title);
   const pt = partType.toLowerCase();
   const queries: string[] = [];
 
+  if (watch) {
+    if (pt.includes("crown")) {
+      if (deviceName) queries.push(`${deviceName} digital crown`);
+      queries.push(`Apple Watch digital crown replacement ${modelNum}`.trim());
+      queries.push("Apple Watch digital crown stem assembly");
+    }
+    if (pt.includes("speaker")) {
+      if (deviceName) queries.push(`${deviceName} speaker`);
+      queries.push(`Apple Watch speaker module ${modelNum}`.trim());
+      queries.push("Apple Watch loudspeaker replacement");
+    }
+    if (pt.includes("battery")) {
+      if (deviceName) queries.push(`${deviceName} battery`);
+      queries.push(`Apple Watch battery replacement ${modelNum}`.trim());
+    }
+    if (pt.includes("taptic") || pt.includes("haptic")) {
+      if (deviceName) queries.push(`${deviceName} taptic engine`);
+      queries.push(`Apple Watch taptic engine ${modelNum}`.trim());
+    }
+  }
+
   if (modelNum && partType) queries.push(`${brand} ${partType} ${modelNum}`);
   if (deviceName && partType) queries.push(`${deviceName} ${partType}`);
-  if (gen && partType) queries.push(`${brand} iPad ${gen} ${partType}`);
+  if (!watch && gen && partType) queries.push(`${brand} iPad ${gen} ${partType}`);
+
+  if (watch) {
+    if (line.searchQuery?.trim()) queries.push(line.searchQuery.trim());
+    if (title) queries.push(title);
+    return uniqueQueries(queries).slice(0, 8);
+  }
 
   if (pt.includes("front camera") || pt.includes("facetime")) {
     if (modelNum) queries.push(`iPad front camera module ${modelNum}`);
@@ -96,11 +131,43 @@ export function primaryPartSearchQuery(line: PartLine, sheet: PartSheetContext) 
   return buildPartSearchQueries(line, sheet)[0] || line.title;
 }
 
+/** Catalog-style photos of the part type — not a specific model number. */
+export function buildGenericPartImageQueries(line: PartLine, sheet: PartSheetContext): string[] {
+  const partType = (line.partType || line.title || "replacement part").trim();
+  const title = line.title.trim();
+  const { brand, deviceName, watch } = deviceHints(sheet, title);
+  const pt = partType.toLowerCase();
+  const queries: string[] = [];
+
+  if (watch) {
+    if (pt.includes("crown")) {
+      queries.push("Apple Watch digital crown", "Apple Watch digital crown replacement");
+    } else if (pt.includes("speaker")) {
+      queries.push("Apple Watch speaker", "Apple Watch speaker module");
+    } else if (pt.includes("battery")) {
+      queries.push("Apple Watch battery", "Apple Watch battery replacement");
+    } else if (pt.includes("taptic") || pt.includes("haptic")) {
+      queries.push("Apple Watch taptic engine", "Apple Watch taptic engine module");
+    } else if (pt.includes("back") || pt.includes("housing") || pt.includes("cover")) {
+      queries.push("Apple Watch back cover", "Apple Watch rear housing");
+    } else if (pt.includes("lcd") || pt.includes("screen") || pt.includes("display")) {
+      queries.push("Apple Watch LCD screen", "Apple Watch screen assembly");
+    } else {
+      queries.push(`Apple Watch ${partType}`, `Apple Watch ${partType} replacement`);
+    }
+  } else {
+    const device = /\bipad\b/i.test(deviceName) ? "iPad" : brand || "Apple";
+    queries.push(`${device} ${partType}`, `${device} ${partType} replacement`);
+  }
+
+  return uniqueQueries(queries).slice(0, 4);
+}
+
 export function partImageCacheKey(line: PartLine, sheet: PartSheetContext) {
-  const { modelNum, brand } = deviceHints(sheet, line.title);
+  const { brand, watch } = deviceHints(sheet, line.title);
   return {
-    brand: brand.trim() || "Unknown",
-    modelNum: modelNum.trim() || "unknown",
+    brand: watch ? "Apple Watch" : brand.trim() || "Unknown",
+    modelNum: "generic",
     partType: (line.partType || line.title).trim().slice(0, 80),
   };
 }

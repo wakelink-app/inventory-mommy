@@ -5,7 +5,8 @@ import { prisma } from "./prisma";
 import { identifyFromPhotos, estimateListing, analyzeDevicePartsFromPhotos } from "./ai";
 import { createPartSheetFromAnalysis, getPartSheetForUser, findPartSheetForScannedItem } from "./part-sheet";
 import { itemInclude, locationLabelsFor, nextSku, serializeItem } from "./catalog";
-import { saveJpeg, UPLOAD_DIR } from "./uploads";
+import { toNodeBuffer } from "./bytes";
+import { persistJpeg, toJpeg, toVisionJpeg } from "./uploads";
 import {
   CAPTURE_PRIVATE_BUCKET,
   CAPTURE_PUBLIC_BUCKET,
@@ -82,7 +83,43 @@ export function captureQrUrl(token: string) {
   return capturePhonePageUrl(token);
 }
 
-async function readPublicSession(token: string): Promise<PublicSession | null> {
+const STATUS_RANK: Record<string, number> = {
+  waiting: 0,
+  capturing: 1,
+  ready: 2,
+  generating: 3,
+  complete: 4,
+  expired: 5,
+};
+
+const sessionMemory = new Map<string, PublicSession>();
+const signedUrlMemory = new Map<string, { url: string; exp: number }>();
+
+function slotIdFromPath(filename: string, slots: CaptureSlot[]) {
+  const match = slots.find((slot) => slot.path === filename);
+  if (match) return match.id;
+  const leaf = filename.split("/").pop()?.replace(/\.jpe?g$/i, "") ?? "";
+  return leaf || filename;
+}
+
+function mergeSession(base: PublicSession, overlay: Partial<PublicSession>): PublicSession {
+  const status =
+    STATUS_RANK[overlay.status ?? ""] >= STATUS_RANK[base.status]
+      ? (overlay.status as CaptureStatus)
+      : base.status;
+  const photos =
+    (overlay.photos?.length ?? 0) >= base.photos.length ? (overlay.photos ?? base.photos) : base.photos;
+  return {
+    ...base,
+    ...overlay,
+    status,
+    photos,
+    hint: overlay.hint || base.hint,
+    slots: overlay.slots?.length ? overlay.slots : base.slots,
+  };
+}
+
+async function downloadStorageSession(token: string): Promise<PublicSession | null> {
   const supabase = supabaseAdmin();
   const { data, error } = await supabase.storage.from(CAPTURE_PUBLIC_BUCKET).download(sessionObjectPath(token));
   if (error || !data) return null;
@@ -90,14 +127,91 @@ async function readPublicSession(token: string): Promise<PublicSession | null> {
   return JSON.parse(text) as PublicSession;
 }
 
+async function persistSessionMirror(session: PublicSession) {
+  await prisma.captureSession.upsert({
+    where: { token: session.token },
+    create: {
+      token: session.token,
+      status: session.status,
+      hint: session.hint ?? "",
+      itemId: session.itemId,
+      userId: session.userId,
+      expiresAt: new Date(session.expiresAt),
+      photos: {
+        create: session.photos.map((photo, index) => ({
+          filename: photo.path,
+          sortOrder: index,
+        })),
+      },
+    },
+    update: {
+      status: session.status,
+      hint: session.hint ?? "",
+      itemId: session.itemId,
+      photos: {
+        deleteMany: {},
+        create: session.photos.map((photo, index) => ({
+          filename: photo.path,
+          sortOrder: index,
+        })),
+      },
+    },
+  });
+}
+
+async function readPublicSession(token: string): Promise<PublicSession | null> {
+  const [storage, db] = await Promise.all([
+    downloadStorageSession(token),
+    prisma.captureSession
+      .findUnique({
+        where: { token },
+        include: { photos: { orderBy: { sortOrder: "asc" } } },
+      })
+      .catch(() => null),
+  ]);
+
+  let raw = sessionMemory.get(token) ?? storage;
+  if (!raw && storage) raw = storage;
+  if (!raw) return null;
+  if (storage) raw = mergeSession(storage, raw);
+
+  if (db) {
+    const slots = raw.slots;
+    raw = mergeSession(raw, {
+      status: db.status as CaptureStatus,
+      hint: db.hint,
+      photos: db.photos.map((photo) => ({
+        id: slotIdFromPath(photo.filename, slots),
+        path: photo.filename,
+      })),
+    });
+  }
+
+  sessionMemory.set(token, raw);
+  return raw;
+}
+
 async function writePublicSession(session: PublicSession) {
+  sessionMemory.set(session.token, session);
   const supabase = supabaseAdmin();
   const body = JSON.stringify(session);
-  const { error } = await supabase.storage.from(CAPTURE_PUBLIC_BUCKET).upload(sessionObjectPath(session.token), body, {
-    contentType: "application/json",
-    upsert: true,
-  });
-  if (error) throw new Error(error.message);
+  const [mirror, upload] = await Promise.allSettled([
+    persistSessionMirror(session),
+    supabase.storage.from(CAPTURE_PUBLIC_BUCKET).upload(sessionObjectPath(session.token), body, {
+      contentType: "application/json",
+      cacheControl: "0",
+      upsert: true,
+    }),
+  ]);
+  if (upload.status === "rejected") {
+    throw upload.reason instanceof Error ? upload.reason : new Error("Could not save session");
+  }
+  if (upload.status === "fulfilled" && upload.value.error) {
+    throw new Error(upload.value.error.message);
+  }
+  if (mirror.status === "rejected") {
+    // Storage and memory are enough if the mirror table is unavailable.
+  }
 }
 
 function toRecord(raw: PublicSession): CaptureRecord {
@@ -124,9 +238,13 @@ function toRecord(raw: PublicSession): CaptureRecord {
 }
 
 async function signedReadUrl(storagePath: string) {
+  const cached = signedUrlMemory.get(storagePath);
+  if (cached && cached.exp > Date.now()) return cached.url;
+
   const supabase = supabaseAdmin();
   const { data, error } = await supabase.storage.from(CAPTURE_PRIVATE_BUCKET).createSignedUrl(storagePath, 3600);
   if (error || !data?.signedUrl) return "";
+  signedUrlMemory.set(storagePath, { url: data.signedUrl, exp: Date.now() + 45 * 60 * 1000 });
   return data.signedUrl;
 }
 
@@ -152,6 +270,16 @@ export async function serializeCapture(session: CaptureRecord, origin?: string) 
     slots: session.slots,
     sessionUploadUrl: session.sessionUploadUrl,
     url: capturePageUrl(origin, session.token),
+  };
+}
+
+export function serializeCaptureMeta(session: CaptureRecord) {
+  return {
+    token: session.token,
+    status: session.status,
+    hint: session.hint,
+    photoIds: session.photos.map((photo) => photo.id),
+    photoCount: session.photos.length,
   };
 }
 
@@ -306,7 +434,7 @@ export async function removeCapturePhoto(token: string, photoId: string) {
   return { ok: true };
 }
 
-export async function markCaptureReady(token: string) {
+export async function markCaptureReady(token: string, hint?: string) {
   const session = await getCaptureSession(token);
   if (!session || session.status === "expired") return { error: "Session expired", status: 410 as const };
   if (session.status === "complete" || session.status === "generating") {
@@ -318,6 +446,30 @@ export async function markCaptureReady(token: string) {
   const raw = await readPublicSession(token);
   if (!raw) return { error: "Session expired", status: 410 as const };
   raw.status = "ready";
+  if (hint != null) raw.hint = hint;
+  await writePublicSession(raw);
+  return { ok: true };
+}
+
+export async function syncCapturePhotos(
+  token: string,
+  photos: Array<{ id: string; path: string }>,
+  hint?: string,
+) {
+  const raw = await readPublicSession(token);
+  if (!raw) return { error: "Session expired", status: 410 as const };
+  if (raw.status === "expired") return { error: "Session expired", status: 410 as const };
+  if (raw.status === "complete" || raw.status === "generating") {
+    return { error: "This session already finished", status: 409 as const };
+  }
+  const allowed = new Set(raw.slots.map((slot) => slot.path));
+  const nextPhotos = photos.filter((photo) => allowed.has(photo.path));
+  if (nextPhotos.length === 0) {
+    return { error: "Add at least one photo first", status: 400 as const };
+  }
+  raw.photos = nextPhotos;
+  raw.status = raw.status === "ready" ? "ready" : "capturing";
+  if (hint != null) raw.hint = hint;
   await writePublicSession(raw);
   return { ok: true };
 }
@@ -357,10 +509,7 @@ export async function generateItemFromSession(token: string, hint: string) {
       return { item: serializeItem(existing, labels) };
     }
   }
-  if (session.status === "generating") {
-    return { error: "Already generating", status: 409 as const };
-  }
-  if (session.status !== "ready") {
+  if (session.status !== "ready" && session.status !== "generating") {
     return { error: "Press Done after your photos first", status: 400 as const };
   }
   if (session.photos.length === 0) {
@@ -368,7 +517,7 @@ export async function generateItemFromSession(token: string, hint: string) {
   }
 
   const raw = await readPublicSession(token);
-  if (!raw || raw.status !== "ready") {
+  if (!raw || (raw.status !== "ready" && raw.status !== "generating")) {
     return { error: "Already generating", status: 409 as const };
   }
   raw.status = "generating";
@@ -376,25 +525,14 @@ export async function generateItemFromSession(token: string, hint: string) {
   await writePublicSession(raw);
 
   try {
-    const supabase = supabaseAdmin();
-    const images: { mime: string; base64: string }[] = [];
-    const localNames: string[] = [];
-    for (const photo of session.photos.slice(0, MAX_CAPTURE_PHOTOS)) {
-      const { data, error } = await supabase.storage.from(CAPTURE_PRIVATE_BUCKET).download(photo.filename);
-      if (error || !data) throw new Error(error?.message || "Could not download a photo");
-      const buffer = Buffer.from(await data.arrayBuffer());
-      const filename = await saveJpeg(buffer, "capture");
-      localNames.push(filename);
-      const stored = await readFile(path.join(UPLOAD_DIR, filename));
-      images.push({ mime: "image/jpeg", base64: stored.toString("base64") });
-    }
+    const { images, localNames } = await downloadSessionImages(session, { persistAll: true });
 
     const identify = await identifyFromPhotos(images, hint);
     const estimate = await estimateListing(identify);
 
     const item = await prisma.item.create({
       data: {
-        sku: await nextSku(userId),
+        sku: await nextSku(userId, identify),
         title: identify.title,
         brand: identify.brand || null,
         model: identify.model || identify.modelNumber || null,
@@ -453,20 +591,32 @@ export async function generateItemFromSession(token: string, hint: string) {
   }
 }
 
-async function downloadSessionImages(session: CaptureRecord) {
+async function downloadSessionImages(
+  session: CaptureRecord,
+  options?: { persistAll?: boolean },
+) {
   const supabase = supabaseAdmin();
-  const images: { mime: string; base64: string }[] = [];
-  const localNames: string[] = [];
-  for (const photo of session.photos.slice(0, MAX_CAPTURE_PHOTOS)) {
-    const { data, error } = await supabase.storage.from(CAPTURE_PRIVATE_BUCKET).download(photo.filename);
-    if (error || !data) throw new Error(error?.message || "Could not download a photo");
-    const buffer = Buffer.from(await data.arrayBuffer());
-    const filename = await saveJpeg(buffer, "capture");
-    localNames.push(filename);
-    const stored = await readFile(path.join(UPLOAD_DIR, filename));
-    images.push({ mime: "image/jpeg", base64: stored.toString("base64") });
-  }
-  return { images, localNames };
+  const photos = session.photos.slice(0, MAX_CAPTURE_PHOTOS);
+  const processed = await Promise.all(
+    photos.map(async (photo, index) => {
+      const { data, error } = await supabase.storage.from(CAPTURE_PRIVATE_BUCKET).download(photo.filename);
+      if (error || !data) throw new Error(error?.message || "Could not download a photo");
+      const buffer = await toNodeBuffer(data);
+      const persistThis = options?.persistAll || index === 0;
+      const [vision, stored] = await Promise.all([
+        toVisionJpeg(buffer),
+        persistThis ? toJpeg(buffer).then((jpeg) => persistJpeg(jpeg, "capture")) : Promise.resolve(null),
+      ]);
+      return {
+        image: { mime: "image/jpeg" as const, base64: vision.toString("base64") },
+        localName: stored,
+      };
+    }),
+  );
+  return {
+    images: processed.map((item) => item.image),
+    localNames: processed.map((item) => item.localName).filter((name): name is string => Boolean(name)),
+  };
 }
 
 export async function generatePartSheetFromSession(token: string, hint: string) {
@@ -504,10 +654,7 @@ export async function generatePartSheetFromSession(token: string, hint: string) 
       return { partSheet: existing };
     }
   }
-  if (session.status === "generating") {
-    return { error: "Already analyzing", status: 409 as const };
-  }
-  if (session.status !== "ready") {
+  if (session.status !== "ready" && session.status !== "generating") {
     return { error: "Press Done after your photos first", status: 400 as const };
   }
   if (session.photos.length === 0) {
@@ -515,7 +662,7 @@ export async function generatePartSheetFromSession(token: string, hint: string) 
   }
 
   const raw = await readPublicSession(token);
-  if (!raw || raw.status !== "ready") {
+  if (!raw || (raw.status !== "ready" && raw.status !== "generating")) {
     return { error: "Already analyzing", status: 409 as const };
   }
   raw.status = "generating";
@@ -523,13 +670,15 @@ export async function generatePartSheetFromSession(token: string, hint: string) 
   await writePublicSession(raw);
 
   try {
-    const { images, localNames } = await downloadSessionImages(session);
-    const sourceItem = session.itemId
-      ? await prisma.item.findFirst({
-          where: { id: session.itemId, userId },
-          select: { sku: true, title: true, model: true, brand: true },
-        })
-      : null;
+    const [{ images, localNames }, sourceItem] = await Promise.all([
+      downloadSessionImages(session),
+      session.itemId
+        ? prisma.item.findFirst({
+            where: { id: session.itemId, userId },
+            select: { sku: true, title: true, model: true, brand: true },
+          })
+        : Promise.resolve(null),
+    ]);
     const analysis = await analyzeDevicePartsFromPhotos(images, hint, {
       boxLabel: session.locationLabel ?? undefined,
       scannedItem: sourceItem

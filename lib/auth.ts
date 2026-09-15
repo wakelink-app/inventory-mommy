@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 
@@ -44,7 +45,7 @@ export async function countUsers() {
   return prisma.user.count();
 }
 
-export async function getCurrentUser(): Promise<AuthUser | null> {
+export const getCurrentUser = cache(async (): Promise<AuthUser | null> => {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -59,7 +60,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
     return null;
   }
   return { id: session.user.id, email: session.user.email };
-}
+});
 
 export async function createSession(userId: string) {
   const token = newSessionToken();

@@ -5,6 +5,7 @@ import {
   attachStockImagesToSheet,
   repricePartSheetLine,
   repricePartSheetRecord,
+  searchOtherWebsitesForLine,
 } from "@/lib/part-sheet-actions";
 import { getPartSheetForUser, serializePartSheet } from "@/lib/part-sheet";
 
@@ -33,6 +34,19 @@ export async function POST(request: Request, context: RouteContext) {
         ? await repricePartSheetLine(sheet, body.lineId)
         : await repricePartSheetRecord(sheet);
       return NextResponse.json({ sheet: updated ? serializePartSheet(updated) : null });
+    }
+
+    if (body.action === "other-web") {
+      if (!body.lineId) {
+        return NextResponse.json({ error: "Pick a part first" }, { status: 400 });
+      }
+      const result = await searchOtherWebsitesForLine(sheet, body.lineId);
+      return NextResponse.json({
+        sheet: serializePartSheet(result.sheet),
+        imageSaved: result.imageSaved,
+        imageNote: result.imageNote,
+        priced: result.priced,
+      });
     }
 
     if (body.action === "images") {

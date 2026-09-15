@@ -63,7 +63,13 @@ export async function POST(request: Request) {
         skipped += 1;
         continue;
       }
-      sku = await nextSku(userId);
+      sku = await nextSku(userId, {
+        title: row.title,
+        brand: row.brand,
+        model: row.model,
+        category: row.categoryId,
+        notes: row.notes,
+      });
     }
     const priceText = row.price.replace(/[$,]/g, "").trim();
     const price = priceText ? Number(priceText) : null;

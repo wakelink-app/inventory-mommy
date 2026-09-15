@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { toNodeBuffer } from "./bytes";
 
 const PRIVATE_BUCKET = "captures";
 const PUBLIC_BUCKET = "capture-public";
@@ -82,6 +83,43 @@ export async function uploadPublicEbayPhoto(
   }
 
   return publicStorageObjectUrl(cleaned);
+}
+
+const INVENTORY_PHOTO_PREFIX = "inventory";
+
+export function inventoryPhotoObjectPath(filename: string) {
+  return `${INVENTORY_PHOTO_PREFIX}/${filename.replace(/^\/+/, "")}`;
+}
+
+export async function uploadInventoryPhoto(filename: string, jpeg: Buffer) {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!.trim();
+  const objectPath = inventoryPhotoObjectPath(filename);
+  const encodedPath = objectPath.split("/").map(encodeURIComponent).join("/");
+  const endpoint = `${supabaseUrl()}/storage/v1/object/${CAPTURE_PRIVATE_BUCKET}/${encodedPath}`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "image/jpeg",
+      "x-upsert": "true",
+    },
+    body: new Uint8Array(jpeg),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `Could not save photo (${response.status})`);
+  }
+  return objectPath;
+}
+
+export async function downloadInventoryPhoto(filename: string): Promise<Buffer | null> {
+  const supabase = supabaseAdmin();
+  const { data, error } = await supabase.storage
+    .from(CAPTURE_PRIVATE_BUCKET)
+    .download(inventoryPhotoObjectPath(filename));
+  if (error || !data) return null;
+  return toNodeBuffer(data);
 }
 
 export async function createSignedUploadUrl(bucket: string, path: string, expiresIn = 7200) {

@@ -8,7 +8,7 @@ import { lookupCachedPartImage, upsertCachedPartImage } from "./part-image-cache
 import type { PartImageCacheKey } from "./part-image-cache-db";
 import { persistPartImageUrl } from "./part-image-cache";
 import { parseModelJson } from "./parse-model-json";
-import { getOpenAiKey } from "./secrets";
+import { getOpenAiKey, getSerpApiKey } from "./secrets";
 
 export type PartStockImage = {
   imageUrl: string | null;
@@ -28,9 +28,9 @@ export type PartImageRequest = {
   forceRefresh?: boolean;
 };
 
-const MAX_QUERIES = 5;
+const MAX_QUERIES = 2;
 const IMAGE_CONCURRENCY = 3;
-const OPENAI_TIMEOUT_MS = 45_000;
+const OPENAI_TIMEOUT_MS = 20_000;
 
 export { normalizeImageUrl } from "./image-url";
 export type { PartImageCacheKey } from "./part-image-cache-db";
@@ -43,7 +43,7 @@ async function openaiClient() {
 
 function buildEbayImagePrompt(part: { title: string; partType?: string | null; searchQuery: string }) {
   const label = part.partType ? `${part.partType} — ${part.title}` : part.title;
-  return `Find ONE accurate product photo for this exact eBay part listing.
+  return `Find ONE generic catalog product photo for this replacement part type.
 
 Part: ${label}
 Search eBay.com for: "${part.searchQuery}"
@@ -60,14 +60,15 @@ Rules:
 - sourceUrl MUST be the eBay listing page URL where you found the image
 - Photo must show ONLY this replacement part/module — NOT a full assembled device
 - Reject listing photos where a whole phone/tablet/laptop is the main subject when this is an internal part
-- Must match THIS part type exactly
+- A generic photo of this part type is fine — it does not need this exact model number
+- Must match THIS part type
 - Do NOT use watermarked or stock-photo preview images
 - If nothing found, set imageUrl to null`;
 }
 
 function buildGoogleImagePrompt(part: { title: string; partType?: string | null; searchQuery: string }) {
   const label = part.partType ? `${part.partType} — ${part.title}` : part.title;
-  return `Find ONE accurate product photo for this device replacement part.
+  return `Find ONE generic catalog product photo for this replacement part type.
 
 Part: ${label}
 Search Google Images for: "${part.searchQuery} replacement part"
@@ -85,7 +86,8 @@ Rules:
 - Photo must show ONLY the replacement part/module on a plain background — not a full device
 - Reject diagrams, logos, stock icons, or photos with hands/people
 - Reject ANY watermarked, copyright-stamped, or stock-photo preview images
-- Must match THIS part type exactly
+- A generic photo of this part type is fine — it does not need this exact model number
+- Must match THIS part type
 - If nothing found, set imageUrl to null`;
 }
 
@@ -249,18 +251,16 @@ export async function findStockImageWithRetries(
     }
   }
 
-  if (!request.forceRefresh) {
-    const scraped = await scrapeImageFromListingUrls(listingUrls, partInfo);
-    if (scraped.imageUrl && !usedUrls.has(scraped.imageUrl)) {
-      usedUrls.add(scraped.imageUrl);
-      if (cacheKey) await upsertCachedPartImage(cacheKey, scraped.imageUrl, "scrape");
-      return {
-        imageUrl: scraped.imageUrl,
-        imageNote: "Photo from eBay listing (part only).",
-        searchQuery: defaultQuery,
-        imageSourceUrl: scraped.sourceUrl,
-      };
-    }
+  const scraped = await scrapeImageFromListingUrls(listingUrls, partInfo);
+  if (scraped.imageUrl && !usedUrls.has(scraped.imageUrl)) {
+    usedUrls.add(scraped.imageUrl);
+    if (cacheKey) await upsertCachedPartImage(cacheKey, scraped.imageUrl, "scrape");
+    return {
+      imageUrl: scraped.imageUrl,
+      imageNote: "Photo from eBay listing (part only).",
+      searchQuery: defaultQuery,
+      imageSourceUrl: scraped.sourceUrl,
+    };
   }
 
   for (const searchQuery of queries) {
@@ -275,25 +275,22 @@ export async function findStockImageWithRetries(
         imageSourceUrl: serpResult.sourceUrl,
       };
     }
-
-    const ebayResult = await searchImageOnEbay({ ...partInfo, searchQuery }, cacheKey);
-    if (ebayResult.imageUrl && !usedUrls.has(ebayResult.imageUrl)) {
-      usedUrls.add(ebayResult.imageUrl);
-      return ebayResult;
-    }
-
-    const googleResult = await searchImageOnGoogle({ ...partInfo, searchQuery }, cacheKey);
-    if (googleResult.imageUrl && !usedUrls.has(googleResult.imageUrl)) {
-      usedUrls.add(googleResult.imageUrl);
-      return googleResult;
-    }
   }
 
+  const fallbackQuery = queries[0] || defaultQuery;
+  const ebayResult = await searchImageOnEbay({ ...partInfo, searchQuery: fallbackQuery }, cacheKey);
+  if (ebayResult.imageUrl && !usedUrls.has(ebayResult.imageUrl)) {
+    usedUrls.add(ebayResult.imageUrl);
+    return ebayResult;
+  }
+
+  const hasSerp = Boolean(await getSerpApiKey());
   return {
     imageUrl: null,
-    imageNote:
-      listingUrls.length > 0
-        ? "No photo found — try adding a SerpAPI key in Settings, or upload a photo."
+    imageNote: hasSerp
+      ? "Couldn't find a clean photo for this part. Upload one, or press Create image again."
+      : listingUrls.length > 0
+        ? "No photo found — add a SerpAPI key in Settings, or upload a photo."
         : "No photo found — run Generate total first, or upload a photo.",
     searchQuery: defaultQuery,
   };
@@ -313,4 +310,50 @@ export async function findStockImageForPartRequest(
   usedUrls = new Set<string>(),
 ): Promise<PartStockImage> {
   return findStockImageWithRetries(request, usedUrls);
+}
+
+/** Catalog photo from Google / other shops — never eBay. */
+export async function findNonEbayStockImage(
+  request: PartImageRequest,
+  usedUrls = new Set<string>(),
+): Promise<PartStockImage> {
+  const queries = request.searchQueries.slice(0, MAX_QUERIES);
+  const defaultQuery = queries[0] || request.title;
+  const partInfo = {
+    title: request.title,
+    partType: request.partType,
+    modelNumbers: request.modelNumbers,
+  };
+
+  for (const searchQuery of queries) {
+    const serpResult = await findImageViaSerpApi(searchQuery, partInfo, { excludeEbay: true });
+    if (serpResult && !usedUrls.has(serpResult.imageUrl)) {
+      usedUrls.add(serpResult.imageUrl);
+      if (request.cacheKey) await upsertCachedPartImage(request.cacheKey, serpResult.imageUrl, "serp");
+      return {
+        imageUrl: serpResult.imageUrl,
+        imageNote: "Photo from another website (not eBay).",
+        searchQuery,
+        imageSourceUrl: serpResult.sourceUrl,
+      };
+    }
+  }
+
+  const google = await searchImageOnGoogle({ ...partInfo, searchQuery: defaultQuery }, request.cacheKey);
+  if (google.imageUrl && !usedUrls.has(google.imageUrl) && !isEbayImageUrl(google.imageUrl)) {
+    usedUrls.add(google.imageUrl);
+    return {
+      ...google,
+      imageNote: "Photo from another website (not eBay).",
+    };
+  }
+
+  const hasSerp = Boolean(await getSerpApiKey());
+  return {
+    imageUrl: null,
+    imageNote: hasSerp
+      ? "Couldn't find a non-eBay photo for this part. Upload one or paste a URL."
+      : "Add a SerpAPI key in Settings to search other websites, or upload a photo.",
+    searchQuery: defaultQuery,
+  };
 }

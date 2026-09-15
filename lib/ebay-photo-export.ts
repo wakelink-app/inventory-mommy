@@ -5,7 +5,7 @@ import {
   supabaseConfigured,
   uploadPublicEbayPhoto,
 } from "./supabase";
-import { UPLOAD_DIR } from "./uploads";
+import { readStoredJpeg, UPLOAD_DIR } from "./uploads";
 
 const PART_IMAGE_DIR = path.join(process.cwd(), "public", "part-images");
 
@@ -52,7 +52,12 @@ async function readLocalImageBytes(imageUrl: string | null | undefined): Promise
     return null; // already public — handled by caller
   }
 
-  if (raw.startsWith("/part-images/") || raw.startsWith("/api/uploads/")) {
+  if (raw.startsWith("/api/uploads/")) {
+    const filename = decodePathSegment(raw.slice("/api/uploads/".length).split("?")[0] ?? "");
+    return filename ? readStoredJpeg(filename) : null;
+  }
+
+  if (raw.startsWith("/part-images/")) {
     const filePath = resolveLocalImagePath(raw);
     if (!filePath) return null;
     try {

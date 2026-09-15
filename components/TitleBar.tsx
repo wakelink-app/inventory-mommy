@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { usePathname } from "next/navigation";
 import { BrandMark } from "./BrandMark";
+import { useDisplayPath } from "./AppNavigation";
 
 const titles: Record<string, string> = {
   "/": "Dashboard",
@@ -19,7 +19,7 @@ const titles: Record<string, string> = {
 };
 
 export function TitleBar() {
-  const pathname = usePathname();
+  const pathname = useDisplayPath().split("?")[0] || "/";
   const backHref = pathname.startsWith("/part-sheets/") ? "/analyzed" : null;
   const title = pathname.startsWith("/items/")
     ? "Item"

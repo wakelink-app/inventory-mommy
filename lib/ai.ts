@@ -1,6 +1,4 @@
 import OpenAI from "openai";
-import { enrichPartsWithMarketPrices, pricePartsFromMarketWithRetries } from "./market-comps";
-import { buildPartSearchQueries } from "./part-search-queries";
 import type { DevicePartsAnalysis, IdentifyResult, PriceEstimate } from "./types";
 import { getOpenAiKey } from "./secrets";
 
@@ -9,7 +7,7 @@ async function client() {
   if (!key) {
     throw new Error("Add your OpenAI API key in Settings.");
   }
-  return new OpenAI({ apiKey: key });
+  return new OpenAI({ apiKey: key, timeout: 45_000 });
 }
 
 export async function openaiConfigured(): Promise<boolean> {
@@ -44,9 +42,12 @@ export async function identifyFromPhotos(
       text: `${IDENTIFY_PROMPT}\n\nUser hint: ${hint.trim() || "(none)"}`,
     },
     ...images.map(
-      (image): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
+      (image, index): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
         type: "image_url",
-        image_url: { url: `data:${image.mime};base64,${image.base64}` },
+        image_url: {
+          url: `data:${image.mime};base64,${image.base64}`,
+          detail: index < 2 ? "high" : "low",
+        },
       }),
     ),
   ];
@@ -223,9 +224,12 @@ export async function analyzeDevicePartsFromPhotos(
       text: `${PARTS_ANALYSIS_PROMPT}\n\n${context || "User hint: (none)"}`,
     },
     ...images.map(
-      (image): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
+      (image, index): OpenAI.Chat.Completions.ChatCompletionContentPart => ({
         type: "image_url",
-        image_url: { url: `data:${image.mime};base64,${image.base64}` },
+        image_url: {
+          url: `data:${image.mime};base64,${image.base64}`,
+          detail: index < 2 ? "high" : "low",
+        },
       }),
     ),
   ];
@@ -271,21 +275,6 @@ export async function analyzeDevicePartsFromPhotos(
     throw new Error("Could not find any sellable parts in the photos.");
   }
 
-  const marketPrices = await pricePartsFromMarketWithRetries(
-    parts.map((part) => ({
-      part,
-      searchQueries: buildPartSearchQueries(
-        { partType: part.partType, title: part.title, searchQuery: part.searchQuery },
-        {
-          masterBrand: master.brand,
-          masterModel: master.model,
-          masterTitle: String(master.title ?? "").trim(),
-        },
-      ),
-    })),
-  );
-  const pricedParts = enrichPartsWithMarketPrices(parts, marketPrices);
-
   return {
     master: {
       title: master.title,
@@ -293,6 +282,6 @@ export async function analyzeDevicePartsFromPhotos(
       model: master.model,
       description: master.description,
     },
-    parts: pricedParts,
+    parts,
   };
 }

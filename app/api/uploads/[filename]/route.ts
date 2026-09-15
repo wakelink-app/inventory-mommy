@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
-import { createReadStream } from "fs";
-import { stat } from "fs/promises";
 import path from "path";
-import { Readable } from "stream";
 import { requireApiAuth } from "@/lib/auth";
-import { UPLOAD_DIR } from "@/lib/uploads";
+import { readStoredJpeg } from "@/lib/uploads";
 
 type RouteContext = { params: Promise<{ filename: string }> };
 
@@ -22,19 +19,12 @@ export async function GET(_request: Request, context: RouteContext) {
     if (unauthorized) return unauthorized;
   }
 
-  const filePath = path.join(UPLOAD_DIR, safe);
-  try {
-    const info = await stat(filePath);
-    if (!info.isFile()) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 });
-    }
-  } catch {
+  const jpeg = await readStoredJpeg(safe);
+  if (!jpeg) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const stream = createReadStream(filePath);
-  const webStream = Readable.toWeb(stream) as ReadableStream;
-  return new NextResponse(webStream, {
+  return new NextResponse(new Uint8Array(jpeg), {
     headers: {
       "Content-Type": "image/jpeg",
       "Cache-Control": "private, max-age=31536000, immutable",

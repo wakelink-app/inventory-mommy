@@ -86,6 +86,8 @@ export function isRelevantPartComp(
   if (!listingMatchesExpectedModels(comp.title, part.modelNumbers ?? [])) return false;
 
   const keywords: string[] = [];
+  if (blob.includes("crown")) keywords.push("crown", "digital crown", "stem");
+  if (blob.includes("taptic") || blob.includes("haptic")) keywords.push("taptic", "haptic", "taptic engine");
   if (blob.includes("speaker")) keywords.push("speaker", "loudspeaker", "audio", "buzzer");
   if (blob.includes("camera")) keywords.push("camera", "facetime", "front camera", "rear camera", "back camera");
   if (blob.includes("home button")) keywords.push("home button", "touch id");
@@ -124,7 +126,9 @@ async function serpRequest(params: Record<string, string>) {
 
   const query = new URLSearchParams({ ...params, api_key: key });
   try {
-    const response = await fetch(`https://serpapi.com/search.json?${query}`);
+    const response = await fetch(`https://serpapi.com/search.json?${query}`, {
+      signal: AbortSignal.timeout(8000),
+    });
     if (!response.ok) return null;
     return (await response.json()) as Record<string, unknown>;
   } catch {
@@ -225,17 +229,29 @@ async function searchEbay(query: string): Promise<MarketComp[]> {
   return comps;
 }
 
+export function isEbayComp(comp: Pick<MarketComp, "source" | "url">) {
+  return /ebay/i.test(comp.source) || Boolean(comp.url && /ebay\.com/i.test(comp.url));
+}
+
 export async function searchPartCompsAcrossWeb(
   query: string,
   part: { partType?: string | null; title: string; modelNumbers?: string[] },
+  options?: { engines?: "fast" | "full" | "other" },
 ): Promise<MarketComp[]> {
   const partQuery = `${query} replacement part`.replace(/\s+/g, " ").trim();
-  const batches = await Promise.all([
-    searchEbay(partQuery),
-    searchAmazon(partQuery),
-    searchGoogleShopping(partQuery),
-    searchGoogleOrganic(partQuery),
-  ]);
+  const engines = options?.engines ?? "fast";
+  const batches = await Promise.all(
+    engines === "other"
+      ? [searchAmazon(partQuery), searchGoogleShopping(partQuery), searchGoogleOrganic(partQuery)]
+      : engines === "full"
+        ? [
+            searchEbay(partQuery),
+            searchAmazon(partQuery),
+            searchGoogleShopping(partQuery),
+            searchGoogleOrganic(partQuery),
+          ]
+        : [searchEbay(partQuery), searchGoogleShopping(partQuery)],
+  );
 
   const seen = new Set<string>();
   const merged: MarketComp[] = [];
@@ -243,6 +259,7 @@ export async function searchPartCompsAcrossWeb(
     for (const comp of batch) {
       const key = `${comp.url}|${comp.price}`;
       if (seen.has(key)) continue;
+      if (engines === "other" && isEbayComp(comp)) continue;
       if (!isRelevantPartComp(comp, part)) continue;
       seen.add(key);
       merged.push(comp);

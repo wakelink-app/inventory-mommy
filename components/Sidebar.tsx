@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useLayoutEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { useDisplayPath } from "./AppNavigation";
 import {
   Archive,
   ClipboardList,
@@ -32,7 +32,7 @@ const links = [
 ];
 
 export function Sidebar() {
-  const pathname = usePathname();
+  const pathname = useDisplayPath().split("?")[0] || "/";
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
 
   useLayoutEffect(() => {
@@ -76,6 +76,7 @@ export function Sidebar() {
             <Link
               key={link.href}
               href={link.href}
+              prefetch
               title={link.label}
               aria-label={link.label}
               className={`nav-link ${active ? "active" : ""}`}

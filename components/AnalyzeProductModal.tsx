@@ -117,13 +117,14 @@ export function AnalyzeProductModal({
     if (!current) return;
     await hintFieldRef.current?.stopListening();
     const hintToSend = hintRef.current;
-    setBusy("Analyzing parts…");
+    setBusy("Identifying parts…");
     setError("");
     try {
       const next = await api<CaptureSessionState>(`/api/capture/${current.token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "analyze", hint: hintToSend }),
+        timeoutMs: 90_000,
       });
       setSession(next);
       if (next.partSheet?.id && !doneRef.current) {
@@ -133,7 +134,7 @@ export function AnalyzeProductModal({
     } catch (err) {
       const message = err instanceof Error ? err.message : "Analyze failed";
       if (message.toLowerCase().includes("already analyzed")) {
-        setError("Product already analyzed.");
+        setError("This product already has a part sheet. Open Analyzed to view it.");
       } else if (!message.toLowerCase().includes("already analyzing")) {
         setError(message);
       }
@@ -172,7 +173,9 @@ export function AnalyzeProductModal({
         <button type="button" className="absolute right-3 top-3 rounded-md p-1 text-[var(--muted)]" onClick={onClose}>
           <X size={18} />
         </button>
-        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">Analyze product</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+          {itemId ? "Analyze product" : "Create new product"}
+        </p>
         <h2 className="mt-1 text-lg font-semibold tracking-tight">
           {productInfo?.title ?? location.label}
         </h2>
@@ -191,7 +194,9 @@ export function AnalyzeProductModal({
         )}
         <p className="mt-2 text-sm text-[var(--muted)]">
           {photosLocked
-            ? "Tell the AI what you see — on your phone or here — then press Analyze."
+            ? `Tell the AI what you see — on your phone or here — then press ${
+                itemId ? "Analyze product" : "Create new product"
+              }. Parts show first; live prices fill in after.`
             : hasPhotos
               ? `${photos.length} of ${current.maxPhotos} photos. Press Done on the phone when you're finished.`
               : "Scan the QR on your phone (same Wi‑Fi as this computer), take photos, then press Done."}
@@ -199,7 +204,7 @@ export function AnalyzeProductModal({
 
         {photosSubmitted && photosLocked && current.status !== "complete" && (
           <p className="mt-3 rounded-xl bg-[#e7f8ef] px-3 py-2 text-sm text-[#087443]">
-            Photos received. Add details below, then analyze.
+            Photos received. Add details below, then {itemId ? "analyze" : "create the product"}.
           </p>
         )}
 
@@ -254,7 +259,14 @@ export function AnalyzeProductModal({
               ) : (
                 <Sparkles size={16} />
               )}
-              {busy || (current.status === "generating" ? "Analyzing…" : "Analyze")}
+              {busy ||
+                (current.status === "generating"
+                  ? itemId
+                    ? "Analyzing…"
+                    : "Creating…"
+                  : itemId
+                    ? "Analyze product"
+                    : "Create new product")}
             </button>
           </div>
         )}

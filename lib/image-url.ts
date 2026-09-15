@@ -17,10 +17,19 @@ export function isTrustedAiPartImageUrl(url: string) {
 }
 
 export function isLocalPartImageUrl(url: string) {
-  return (
-    url.startsWith("/part-images/") ||
-    url.startsWith("/api/uploads/part-")
-  );
+  const path = url.split("?")[0] ?? url;
+  return path.startsWith("/part-images/") || path.startsWith("/api/uploads/");
+}
+
+/** User-chosen file or pasted URL — do not overwrite with stock/search photos. */
+export function isUserProvidedPartImage(line: {
+  imageUrl?: string | null;
+  imageNote?: string | null;
+}) {
+  const note = (line.imageNote ?? "").trim().toLowerCase();
+  const path = (line.imageUrl ?? "").split("?")[0] ?? "";
+  if (path.startsWith("/api/uploads/")) return true;
+  return note.startsWith("uploaded photo") || note.startsWith("photo from pasted");
 }
 
 const WATERMARK_URL_PATTERN =

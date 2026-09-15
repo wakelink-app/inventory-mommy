@@ -52,6 +52,41 @@ function hasConflictingGenerationLabel(listingTitle: string, expectedModels: str
   return false;
 }
 
+export function extractWatchSeries(...texts: (string | null | undefined)[]): string | null {
+  for (const text of texts) {
+    const match = String(text ?? "").match(/\bseries\s*(\d+)\b/i);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+export function listingMatchesPartImageTitle(
+  listingTitle: string,
+  part: { title?: string | null; partType?: string | null; modelNumbers?: string[] },
+): boolean {
+  const lower = listingTitle.toLowerCase();
+  const blob = `${part.partType ?? ""} ${part.title ?? ""}`.toLowerCase();
+  const watchPart =
+    blob.includes("watch") ||
+    blob.includes("crown") ||
+    blob.includes("taptic") ||
+    /\bseries\s*\d+\b/.test(blob);
+
+  if (watchPart && /\bipad\b/.test(lower) && !/\bwatch\b/.test(lower)) return false;
+  if (blob.includes("ipad") && /\bwatch\b/.test(lower) && !/\bipad\b/.test(lower)) return false;
+
+  const expectedSeries = extractWatchSeries(part.title, part.partType);
+  const listedSeries = extractWatchSeries(listingTitle);
+  if (expectedSeries && listedSeries && expectedSeries !== listedSeries) return false;
+
+  if (listingMatchesExpectedModels(listingTitle, part.modelNumbers ?? [])) return true;
+  if (watchPart && expectedSeries && listedSeries === expectedSeries) return true;
+  if (watchPart && /\b(watch|crown|taptic|speaker|battery)\b/.test(lower) && !listedSeries) {
+    return true;
+  }
+  return false;
+}
+
 export function listingMatchesExpectedModels(listingTitle: string, expectedModels: string[]): boolean {
   if (expectedModels.length === 0) return true;
 

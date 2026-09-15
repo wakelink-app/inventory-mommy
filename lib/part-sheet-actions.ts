@@ -1,16 +1,24 @@
 import type { PartSheet, PartSheetLine } from "@prisma/client";
 import { scrapeImageFromComps } from "./ebay-listing-scrape";
-import { findStockImageForPartRequest, findStockImagesForParts } from "./part-images";
-import { pricePartsFromMarketWithRetries } from "./market-comps";
+import { isUserProvidedPartImage } from "./image-url";
+import { findNonEbayStockImage, findStockImageForPartRequest, findStockImagesForParts } from "./part-images";
+import { pricePartFromOtherWebsites, pricePartsFromMarketWithRetries } from "./market-comps";
 import { upsertCachedPartImage } from "./part-image-cache-db";
-import { buildPartSearchQueries, partImageCacheKey } from "./part-search-queries";
-import { isRelevantPartComp } from "./market-search-api";
+import { buildGenericPartImageQueries, buildPartSearchQueries, partImageCacheKey } from "./part-search-queries";
 import { modelNumbersFromPartContext } from "./part-model-match";
-import { getPartSheetForUser, parseCompsJson, type PartSheetWithLines } from "./part-sheet";
+import { getPartSheetForUser, type PartSheetWithLines } from "./part-sheet";
 import { prisma } from "./prisma";
 import type { PartStockImage } from "./part-images";
 
-const MAX_SEARCH_QUERIES = 5;
+const MAX_SEARCH_QUERIES = 2;
+
+async function lineKeepsUserPhoto(line: PartSheetLine) {
+  const latest = await prisma.partSheetLine.findUnique({
+    where: { id: line.id },
+    select: { imageUrl: true, imageNote: true },
+  });
+  return isUserProvidedPartImage(latest ?? line);
+}
 
 function partContext(line: PartSheetLine, sheet: PartSheet) {
   return {
@@ -21,16 +29,14 @@ function partContext(line: PartSheetLine, sheet: PartSheet) {
 }
 
 function imageInput(line: PartSheetLine, sheet: PartSheet, options?: { forceRefresh?: boolean }) {
-  const searchQueries = buildPartSearchQueries(line, sheet).slice(0, MAX_SEARCH_QUERIES);
+  const searchQueries = buildGenericPartImageQueries(line, sheet);
   const context = partContext(line, sheet);
-  const comps = parseCompsJson(line.compsJson).filter((comp) => isRelevantPartComp(comp, context));
-  const listingUrls = comps.map((comp) => comp.url).filter((url): url is string => Boolean(url));
   return {
     title: line.title,
     partType: line.partType,
-    modelNumbers: context.modelNumbers,
+    modelNumbers: [],
     searchQueries,
-    listingUrls,
+    listingUrls: [],
     cacheKey: partImageCacheKey(line, sheet),
     forceRefresh: options?.forceRefresh ?? false,
   };
@@ -68,6 +74,7 @@ async function applyMarketPrice(
   if (storedImage.imageUrl) {
     await upsertCachedPartImage(cacheKey, storedImage.imageUrl, "scrape");
   }
+  const keepUserPhoto = await lineKeepsUserPhoto(line);
   await prisma.partSheetLine.update({
     where: { id: line.id },
     data: {
@@ -81,7 +88,7 @@ async function applyMarketPrice(
       priceAltSourceUrl: market.priceAltSourceUrl ?? null,
       priceAltSource: market.priceAltSource ?? null,
       searchQuery: market.searchQuery || input.searchQueries[0] || line.searchQuery,
-      ...(storedImage.imageUrl
+      ...(storedImage.imageUrl && !keepUserPhoto
         ? {
             imageUrl: storedImage.imageUrl,
             imageNote: "Photo from eBay listing (part only).",
@@ -98,6 +105,14 @@ async function applyStockImage(
   input: ReturnType<typeof imageInput>,
   usedUrls: Set<string>,
 ): Promise<PartStockImage> {
+  if (await lineKeepsUserPhoto(line)) {
+    return {
+      imageUrl: line.imageUrl,
+      imageNote: line.imageNote,
+      searchQuery: line.searchQuery || input.searchQueries[0] || "",
+      imageSourceUrl: line.imageSourceUrl,
+    };
+  }
   const image = await findStockImageForPartRequest(input, usedUrls);
   if (image.imageUrl) usedUrls.add(image.imageUrl);
   await prisma.partSheetLine.update({
@@ -143,6 +158,66 @@ export async function attachStockImageToLine(
   return { sheet: updated, image, imageSaved: Boolean(image.imageUrl) };
 }
 
+export async function searchOtherWebsitesForLine(sheet: PartSheetWithLines, lineId: string) {
+  const line = sheet.lines.find((entry) => entry.id === lineId);
+  if (!line) throw new Error("Part not found");
+
+  const pricingInput = partPricingInput(line, sheet);
+  const imageRequest = imageInput(line, sheet, { forceRefresh: true });
+  const usedUrls = new Set(
+    sheet.lines
+      .filter((entry) => entry.id !== lineId)
+      .map((entry) => entry.imageUrl)
+      .filter((url): url is string => Boolean(url)),
+  );
+
+  const keepUserPhoto = await lineKeepsUserPhoto(line);
+  const [market, image] = await Promise.all([
+    pricePartFromOtherWebsites(pricingInput),
+    keepUserPhoto
+      ? Promise.resolve({
+          imageUrl: line.imageUrl,
+          imageNote: line.imageNote,
+          searchQuery: line.searchQuery || imageRequest.searchQueries[0] || "",
+          imageSourceUrl: line.imageSourceUrl,
+        })
+      : findNonEbayStockImage(imageRequest, usedUrls),
+  ]);
+
+  const prices = market.comps.map((comp) => comp.price);
+  await prisma.partSheetLine.update({
+    where: { id: line.id },
+    data: {
+      suggestedPrice: market.suggestedPrice ?? line.suggestedPrice,
+      priceLow: prices.length ? Math.min(...prices) : market.lowestPrice,
+      priceHigh: prices.length ? Math.max(...prices) : market.lowestPrice,
+      compsJson: JSON.stringify(market.comps),
+      priceNote: market.priceNote,
+      priceSourceUrl: market.priceSourceUrl ?? null,
+      priceSource: market.priceSource ?? null,
+      priceAltSourceUrl: market.priceAltSourceUrl ?? null,
+      priceAltSource: market.priceAltSource ?? null,
+      searchQuery: market.searchQuery || image.searchQuery || line.searchQuery,
+      ...(!keepUserPhoto
+        ? {
+            ...(image.imageUrl ? { imageUrl: image.imageUrl } : {}),
+            imageNote: image.imageNote,
+            imageSourceUrl: image.imageSourceUrl ?? null,
+          }
+        : {}),
+    },
+  });
+
+  const updated = await getPartSheetForUser(sheet.id, sheet.userId);
+  if (!updated) throw new Error("Part sheet not found");
+  return {
+    sheet: updated,
+    imageSaved: Boolean(image.imageUrl),
+    imageNote: image.imageNote,
+    priced: market.suggestedPrice != null,
+  };
+}
+
 export async function repricePartSheetRecord(sheet: PartSheetWithLines) {
   if (sheet.lines.length === 0) return sheet;
 
@@ -176,7 +251,7 @@ export async function repricePartSheetRecord(sheet: PartSheetWithLines) {
         priceAltSourceUrl: market.priceAltSourceUrl ?? null,
         priceAltSource: market.priceAltSource ?? null,
         searchQuery: market.searchQuery || inputs[index]?.searchQueries[0] || line.searchQuery,
-        ...(storedImage.imageUrl
+        ...(storedImage.imageUrl && !(await lineKeepsUserPhoto(line))
           ? {
               imageUrl: storedImage.imageUrl,
               imageNote: "Photo from eBay listing (part only).",
@@ -200,6 +275,7 @@ export async function attachStockImagesToSheet(sheet: PartSheetWithLines) {
     const line = sheet.lines[index];
     const image = images[index];
     if (!image) continue;
+    if (await lineKeepsUserPhoto(line)) continue;
     await prisma.partSheetLine.update({
       where: { id: line.id },
       data: {
@@ -229,7 +305,7 @@ export async function setPartLineImageFromUpload(
     data: {
       imageUrl,
       imageNote,
-      ...(sourceUrl?.trim() ? { imageSourceUrl: sourceUrl.trim() } : {}),
+      imageSourceUrl: sourceUrl?.trim() || null,
     },
   });
   return getPartSheetForUser(sheet.id, sheet.userId);

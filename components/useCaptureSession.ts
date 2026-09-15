@@ -12,26 +12,57 @@ export function useCaptureSession(token: string | null) {
     if (!token) return;
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | undefined;
+    let inFlight = false;
+    let lastMeta = "";
 
     async function tick() {
+      if (inFlight) return;
+      inFlight = true;
       try {
-        const data = await api<CaptureSessionState>(`/api/capture/${encodeURIComponent(token!)}`);
+        const path = `/api/capture/${encodeURIComponent(token!)}`;
+        const meta = await api<{
+          status: CaptureSessionState["status"];
+          hint: string;
+          photoIds: string[];
+          photoCount: number;
+        }>(`${path}?meta=1`);
         if (cancelled) return;
-        setSession((prev) => ({
-          ...data,
-          url: prev?.url || data.url,
-        }));
+        const signature = `${meta.status}:${meta.photoCount}:${meta.photoIds.join(",")}:${meta.hint}`;
+        if (signature === lastMeta) return;
+
+        const data = await api<CaptureSessionState>(path);
+        if (cancelled) return;
+        lastMeta = signature;
+        setSession((prev) => {
+          const rank: Record<string, number> = {
+            waiting: 0,
+            capturing: 1,
+            ready: 2,
+            generating: 3,
+            complete: 4,
+            expired: 5,
+          };
+          if (prev && (rank[prev.status] ?? 0) > (rank[data.status] ?? 0)) {
+            return prev;
+          }
+          if (prev && prev.photos.length > data.photos.length) {
+            return { ...data, photos: prev.photos, url: prev.url || data.url };
+          }
+          return { ...data, url: prev?.url || data.url };
+        });
         setError("");
         if (data.status === "complete" || data.status === "expired") {
           if (timer) clearInterval(timer);
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not load session");
+      } finally {
+        inFlight = false;
       }
     }
 
     void tick();
-    timer = setInterval(() => void tick(), 500);
+    timer = setInterval(() => void tick(), 250);
     return () => {
       cancelled = true;
       if (timer) clearInterval(timer);

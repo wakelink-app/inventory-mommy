@@ -5,6 +5,8 @@ import { requirePageAuth } from "@/lib/auth";
 import { openaiConfigured } from "@/lib/ai";
 import { serpApiKeyConfigured } from "@/lib/secrets";
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
   const user = await requirePageAuth();
   const [openai, serpapi] = await Promise.all([openaiConfigured(), serpApiKeyConfigured()]);

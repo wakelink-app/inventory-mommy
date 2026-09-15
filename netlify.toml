@@ -1,16 +1,14 @@
-# Next.js on Netlify (OpenNext adapter is applied automatically)
+# Next.js on Netlify. The OpenNext adapter must run, or Netlify publishes
+# `.next` as static files (no index.html) and every URL 404s.
 [build]
   command = "npm run build"
   publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
-  # Prisma needs the schema at generate/build time
-  PRISMA_CLI_BINARY_TARGETS = "native,rhel-openssl-3.0.x"
 
-# Large photo uploads (analyze / create image)
-[functions]
-  node_bundler = "esbuild"
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [[headers]]
   for = "/*"

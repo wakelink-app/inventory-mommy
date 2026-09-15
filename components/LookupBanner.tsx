@@ -186,19 +186,19 @@ export function LookupBanner({ onClose }: { onClose: () => void }) {
                   type="button"
                   className={
                     item.analyzedPartSheet
-                      ? "btn-secondary mt-4 w-full text-[var(--muted)]"
+                      ? "btn-secondary mt-4 w-full"
                       : "btn-primary mt-4 w-full"
                   }
                   onClick={() => {
                     if (item.analyzedPartSheet) {
-                      flash("Already analyzed");
+                      window.location.href = `/part-sheets/${item.analyzedPartSheet.id}`;
                       return;
                     }
                     setAnalyzeOpen(true);
                   }}
                 >
                   <Sparkles size={18} strokeWidth={1.75} />
-                  Analyze product
+                  {item.analyzedPartSheet ? "View analysis" : "Analyze product"}
                 </button>
               </div>
             )}
@@ -220,7 +220,7 @@ export function LookupBanner({ onClose }: { onClose: () => void }) {
                   onClick={() => setAnalyzeOpen(true)}
                 >
                   <Sparkles size={18} strokeWidth={1.75} />
-                  Analyze product
+                  Create new product
                 </button>
               </div>
             )}

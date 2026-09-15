@@ -178,16 +178,114 @@ body {
   -ms-overflow-style: none;
   padding: 16px;
   -webkit-overflow-scrolling: touch;
+  transition: opacity 0.14s ease;
 }
 
-.app-content::-webkit-scrollbar {
-  display: none;
+.app-content.is-navigating {
+  opacity: 0.72;
 }
 
 .app-content > * {
   width: 100%;
   max-width: 1560px;
   margin-inline: auto;
+  animation: page-enter 0.18s ease;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.nav-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  height: 2px;
+  width: 100%;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.nav-progress::after {
+  content: "";
+  display: block;
+  height: 100%;
+  width: 36%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: nav-progress-slide 0.7s ease-in-out infinite;
+}
+
+@keyframes nav-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.page-skeleton {
+  display: grid;
+  gap: 16px;
+}
+
+.page-skeleton-title {
+  height: 28px;
+  width: min(220px, 50%);
+  border-radius: 10px;
+  background: var(--wash);
+}
+
+.page-skeleton-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.page-skeleton-title,
+.page-skeleton-card,
+.page-skeleton-list {
+  animation: skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.page-skeleton-card,
+.page-skeleton-list {
+  border-radius: 16px;
+  background: var(--wash);
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.page-skeleton-card {
+  height: 88px;
+}
+
+.page-skeleton-list {
+  height: 320px;
+}
+
+@media (max-width: 767px) {
+  .page-skeleton-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.app-content::-webkit-scrollbar {
+  display: none;
 }
 
 @media (min-width: 768px) {
@@ -1330,6 +1428,16 @@ table.data tr:last-child td {
   }
 
   .auth-submit {
+    transition: none;
+  }
+
+  .app-content,
+  .app-content > *,
+  .nav-progress::after,
+  .page-skeleton-title,
+  .page-skeleton-card,
+  .page-skeleton-list {
+    animation: none;
     transition: none;
   }
 }

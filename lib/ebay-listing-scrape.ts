@@ -46,6 +46,7 @@ export async function fetchListingImageUrl(listingUrl: string): Promise<string |
     try {
       const response = await fetch(url, {
         redirect: "follow",
+        signal: AbortSignal.timeout(8000),
         headers: FETCH_HEADERS,
       });
       if (!response.ok) continue;

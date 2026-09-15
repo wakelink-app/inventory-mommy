@@ -67,8 +67,9 @@ Return JSON only:
 }
 
 Rules for acceptable=true:
-- The photo must show ONLY this specific replacement part (or that part module/assembly).
-- Reject if the main subject is a full assembled device when the listing is for an internal part (e.g. whole iPad for an LCD flex).
+- A GENERIC catalog photo of this part type is enough — it does not need to be this exact model number.
+- The photo should show the replacement part (or that part module/assembly), not a complete working device as the main subject.
+- For small watch parts (digital crown, speaker, battery, taptic engine): ACCEPT a close-up of the isolated part on a bench or tray, even if a connector, stem, or bit of housing is visible.
 - Reject diagrams, icons, logos, text-only images, or unrelated products.
 - Reject if hands, faces, or clutter dominate the frame.
 - Reject if ANY watermark, copyright overlay, stock-photo branding, or semi-transparent logo text appears anywhere (Getty, Shutterstock, iStock, Alamy, site URLs, etc.).
@@ -142,19 +143,16 @@ export async function validateAndCropPartImage(
   return { buffer: jpegBuffer, reason: validation.reason };
 }
 
-export function isolatedPartSearchSuffix(partType?: string | null) {
-  const pt = (partType ?? "").toLowerCase();
-  if (pt.includes("lcd") || pt.includes("screen")) {
-    return "OEM replacement LCD module product photo isolated";
-  }
-  if (pt.includes("battery")) {
-    return "OEM replacement battery cell product photo isolated";
-  }
-  if (pt.includes("camera")) {
-    return "OEM camera module flex product photo isolated";
-  }
-  if (pt.includes("speaker")) {
-    return "OEM speaker assembly module product photo isolated";
-  }
-  return "OEM replacement part module product photo isolated white background no watermark";
+export function isolatedPartSearchSuffix(partType?: string | null, title?: string | null) {
+  const pt = `${partType ?? ""} ${title ?? ""}`.toLowerCase();
+  const watch = pt.includes("watch") || pt.includes("crown") || pt.includes("taptic");
+  if (pt.includes("crown")) return "generic Apple Watch digital crown product photo";
+  if (watch && pt.includes("battery")) return "generic Apple Watch battery product photo";
+  if (watch && pt.includes("speaker")) return "generic Apple Watch speaker product photo";
+  if (pt.includes("taptic") || pt.includes("haptic")) return "generic Apple Watch taptic engine photo";
+  if (pt.includes("lcd") || pt.includes("screen")) return "generic replacement LCD product photo";
+  if (pt.includes("battery")) return "generic replacement battery product photo";
+  if (pt.includes("camera")) return "generic camera module product photo";
+  if (pt.includes("speaker")) return "generic speaker module product photo";
+  return "generic replacement part product photo white background";
 }

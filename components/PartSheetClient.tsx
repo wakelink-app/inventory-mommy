@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Download, ImageIcon, Link2, Loader2, Tags, Trash2, Upload, X } from "lucide-react";
+import { Download, Globe, ImageIcon, Link2, Loader2, Tags, Trash2, Upload, X } from "lucide-react";
 import { api } from "@/lib/client";
 import { money } from "@/lib/format";
 
@@ -56,6 +56,7 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [uploadingLineId, setUploadingLineId] = useState("");
+  const [searchingLineId, setSearchingLineId] = useState("");
   const [pasteUrlLineId, setPasteUrlLineId] = useState("");
   const [pasteUrl, setPasteUrl] = useState("");
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
@@ -68,7 +69,44 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
   } | null>(null);
   const [dragOverLineId, setDragOverLineId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const priceInputRef = useRef<HTMLInputElement>(null);
   const pendingUploadLineId = useRef("");
+  const lastPriceTap = useRef({ id: "", at: 0 });
+  const autoPriceStarted = useRef(false);
+  const [editingPriceId, setEditingPriceId] = useState("");
+  const [priceDraft, setPriceDraft] = useState("");
+  const previewUrls = useRef<Record<string, string>>({});
+  const uploadedImageByLine = useRef<Record<string, string>>({});
+  const [imageRevision, setImageRevision] = useState<Record<string, number>>({});
+
+  function revokePreview(lineId: string) {
+    const url = previewUrls.current[lineId];
+    if (url) {
+      URL.revokeObjectURL(url);
+      delete previewUrls.current[lineId];
+    }
+  }
+
+  function applySheet(next: PartSheetData) {
+    setSheet({
+      ...next,
+      lines: next.lines.map((line) => {
+        const uploaded = uploadedImageByLine.current[line.id];
+        if (!uploaded) return line;
+        if (line.imageUrl === uploaded || (line.imageNote ?? "").startsWith("Uploaded photo")) {
+          return line;
+        }
+        return { ...line, imageUrl: uploaded, imageNote: "Uploaded photo.", imageSourceUrl: null };
+      }),
+    });
+  }
+
+  useEffect(() => {
+    const previews = previewUrls.current;
+    return () => {
+      Object.values(previews).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
 
   useEffect(() => {
     if (!lightbox) return;
@@ -204,6 +242,47 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
     }
   }
 
+  useEffect(() => {
+    if (!editingPriceId) return;
+    priceInputRef.current?.focus();
+    priceInputRef.current?.select();
+  }, [editingPriceId]);
+
+  function beginEditPrice(line: PartSheetData["lines"][number]) {
+    setEditingPriceId(line.id);
+    setPriceDraft(line.suggestedPrice != null ? String(line.suggestedPrice) : "");
+  }
+
+  function onPriceActivate(line: PartSheetData["lines"][number]) {
+    const now = Date.now();
+    if (lastPriceTap.current.id === line.id && now - lastPriceTap.current.at < 400) {
+      lastPriceTap.current = { id: "", at: 0 };
+      beginEditPrice(line);
+      return;
+    }
+    lastPriceTap.current = { id: line.id, at: now };
+  }
+
+  async function commitPrice(lineId: string) {
+    const raw = priceDraft.trim();
+    const next = raw === "" ? null : Number(raw);
+    const suggestedPrice = next != null && Number.isFinite(next) && next >= 0 ? next : null;
+    setEditingPriceId("");
+    updateLine(lineId, { suggestedPrice });
+    setError("");
+    try {
+      await api<{ sheet: PartSheetData }>(`/api/part-sheets/${sheet.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lines: [{ id: lineId, suggestedPrice }],
+        }),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save price");
+    }
+  }
+
   function updateLine(id: string, patch: Partial<PartSheetData["lines"][number]>) {
     setSheet((prev) => ({
       ...prev,
@@ -212,20 +291,61 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
   }
 
   async function uploadLineImage(lineId: string, file: File) {
+    if (!file.type.startsWith("image/") && file.type !== "") {
+      setError("Choose an image file (JPG, PNG, or WEBP).");
+      return;
+    }
+    const previous = sheet.lines.find((line) => line.id === lineId);
     setUploadingLineId(lineId);
     setError("");
+    revokePreview(lineId);
+    const preview = URL.createObjectURL(file);
+    previewUrls.current[lineId] = preview;
+    uploadedImageByLine.current[lineId] = preview;
+    setBrokenImages((prev) => ({ ...prev, [lineId]: false }));
+    setImageRevision((prev) => ({ ...prev, [lineId]: Date.now() }));
+    setSheet((prev) => ({
+      ...prev,
+      lines: prev.lines.map((line) =>
+        line.id === lineId
+          ? { ...line, imageUrl: preview, imageNote: "Uploaded photo.", imageSourceUrl: null }
+          : line,
+      ),
+    }));
     try {
       const form = new FormData();
       form.append("file", file);
       const data = await api<{ sheet: PartSheetData; imageSaved?: boolean }>(
         `/api/part-sheets/${sheet.id}/lines/${lineId}/image`,
-        { method: "POST", body: form },
+        { method: "POST", body: form, timeoutMs: 90_000 },
       );
-      if (data.sheet) {
-        setSheet(data.sheet);
-        setBrokenImages((prev) => ({ ...prev, [lineId]: false }));
+      const savedUrl = data.sheet?.lines.find((line) => line.id === lineId)?.imageUrl;
+      if (savedUrl) {
+        uploadedImageByLine.current[lineId] = savedUrl;
+        revokePreview(lineId);
       }
+      if (data.sheet) applySheet(data.sheet);
+      else if (!savedUrl) throw new Error("Upload did not save a photo");
+      setBrokenImages((prev) => ({ ...prev, [lineId]: false }));
+      setImageRevision((prev) => ({ ...prev, [lineId]: Date.now() }));
     } catch (err) {
+      revokePreview(lineId);
+      delete uploadedImageByLine.current[lineId];
+      if (previous) {
+        setSheet((prev) => ({
+          ...prev,
+          lines: prev.lines.map((line) =>
+            line.id === lineId
+              ? {
+                  ...line,
+                  imageUrl: previous.imageUrl,
+                  imageNote: previous.imageNote,
+                  imageSourceUrl: previous.imageSourceUrl,
+                }
+              : line,
+          ),
+        }));
+      }
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setUploadingLineId("");
@@ -247,8 +367,11 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
         },
       );
       if (data.sheet) {
-        setSheet(data.sheet);
+        const savedUrl = data.sheet.lines.find((line) => line.id === lineId)?.imageUrl;
+        if (savedUrl) uploadedImageByLine.current[lineId] = savedUrl;
+        applySheet(data.sheet);
         setBrokenImages((prev) => ({ ...prev, [lineId]: false }));
+        setImageRevision((prev) => ({ ...prev, [lineId]: Date.now() }));
         setPasteUrlLineId("");
         setPasteUrl("");
       }
@@ -256,6 +379,32 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
       setError(err instanceof Error ? err.message : "Could not save image URL");
     } finally {
       setUploadingLineId("");
+    }
+  }
+
+  async function searchOtherWebsites(lineId: string) {
+    setSearchingLineId(lineId);
+    setError("");
+    try {
+      const data = await api<{
+        sheet: PartSheetData;
+        imageSaved?: boolean;
+        priced?: boolean;
+        imageNote?: string;
+      }>(`/api/part-sheets/${sheet.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "other-web", lineId }),
+        timeoutMs: 45_000,
+      });
+      if (data.sheet) applySheet(data.sheet);
+      if (!data.priced && !data.imageSaved) {
+        setError(data.imageNote || "No other-website price or photo found.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not search other websites");
+    } finally {
+      setSearchingLineId("");
     }
   }
 
@@ -304,7 +453,7 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
           })),
         }),
       });
-      if (data.sheet) setSheet(data.sheet);
+      if (data.sheet) applySheet(data.sheet);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -312,9 +461,11 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
     }
   }
 
-  async function runAction(action: "reprice" | "images") {
+  async function runAction(action: "reprice" | "images", options?: { missingOnly?: boolean }) {
     setError("");
-    const lines = sortedLines;
+    const lines = options?.missingOnly
+      ? sortedLines.filter((line) => line.suggestedPrice == null)
+      : sortedLines;
     if (lines.length === 0) return;
 
     let found = 0;
@@ -328,19 +479,25 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
             ? `Pricing part ${index + 1} of ${lines.length}: ${label}…`
             : `Finding image ${index + 1} of ${lines.length}: ${label}…`,
         );
-        const data = await api<{
-          sheet: PartSheetData;
-          imageSaved?: boolean;
-          imageNote?: string;
-        }>(`/api/part-sheets/${sheet.id}/actions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, lineId: line.id }),
-        });
-        if (data.sheet) {
-          setSheet(data.sheet);
-          if (action === "images" && data.imageSaved) found += 1;
-          if (action === "images" && data.imageNote && !data.imageSaved) lastNote = data.imageNote;
+        try {
+          const data = await api<{
+            sheet: PartSheetData;
+            imageSaved?: boolean;
+            imageNote?: string;
+          }>(`/api/part-sheets/${sheet.id}/actions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, lineId: line.id }),
+            timeoutMs: action === "images" ? 90_000 : 35_000,
+          });
+          if (data.sheet) {
+            applySheet(data.sheet);
+            if (action === "images" && data.imageSaved) found += 1;
+            if (action === "images" && data.imageNote && !data.imageSaved) lastNote = data.imageNote;
+          }
+        } catch (err) {
+          if (action !== "images") throw err;
+          lastNote = err instanceof Error ? err.message : "Image search failed";
         }
       }
       if (action === "images") {
@@ -360,6 +517,13 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
     }
   }
 
+  useEffect(() => {
+    if (autoPriceStarted.current) return;
+    if (!initial.lines.some((line) => line.suggestedPrice == null)) return;
+    autoPriceStarted.current = true;
+    void runAction("reprice", { missingOnly: true });
+  }, [initial.id]);
+
   async function removeLine(id: string) {
     setSaving(true);
     setError("");
@@ -369,7 +533,7 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ deleteLineIds: [id] }),
       });
-      if (data.sheet) setSheet(data.sheet);
+      if (data.sheet) applySheet(data.sheet);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete line");
     } finally {
@@ -505,13 +669,36 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {sortedLines.map((line) => {
-          const showImage = line.imageUrl && !brokenImages[line.id];
+          const showImage = Boolean(line.imageUrl) && !brokenImages[line.id];
           const isUploading = uploadingLineId === line.id;
+          const isSearching = searchingLineId === line.id;
+          const imageSrc = (() => {
+            const url = line.imageUrl;
+            if (!url) return "";
+            if (url.startsWith("blob:")) return url;
+            const rev = imageRevision[line.id];
+            if (!rev) return url;
+            return `${url}${url.includes("?") ? "&" : "?"}v=${rev}`;
+          })();
           const pricingLinksList = pricingLinks(line);
           return (
           <article key={line.id} className="card p-0 overflow-hidden">
             <div className="flex gap-4 p-4">
-              <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--wash)]">
+              <div
+                className={`relative h-24 w-24 shrink-0 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--wash)] ${
+                  dragOverLineId === line.id ? "ring-2 ring-[var(--accent)]" : ""
+                }`}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setDragOverLineId(line.id);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  if (dragOverLineId === line.id) setDragOverLineId("");
+                }}
+                onDrop={(event) => handlePhotoDrop(line.id, event)}
+              >
                 {showImage ? (
                   <button
                     type="button"
@@ -521,21 +708,29 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      key={`${line.id}-${line.imageUrl}`}
-                      src={line.imageUrl!}
+                      key={`${line.id}-${imageSrc}`}
+                      src={imageSrc}
                       alt={line.partType || line.title}
                       className="h-full w-full object-cover"
-                      loading="lazy"
                       onError={() =>
                         setBrokenImages((prev) => ({ ...prev, [line.id]: true }))
                       }
                     />
                   </button>
                 ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center text-xs text-[var(--muted)]">
-                    <ImageIcon size={18} strokeWidth={1.5} />
-                    No image
-                  </div>
+                  <button
+                    type="button"
+                    className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center text-xs text-[var(--muted)]"
+                    onClick={() => triggerUpload(line.id)}
+                    disabled={isUploading}
+                  >
+                    {isUploading ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <ImageIcon size={18} strokeWidth={1.5} />
+                    )}
+                    {isUploading ? "Uploading" : "Add photo"}
+                  </button>
                 )}
               </div>
               <div className="min-w-0 flex-1">
@@ -558,7 +753,40 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
                     <Trash2 size={16} />
                   </button>
                 </div>
-                <p className="mt-2 text-2xl font-semibold tracking-tight">{money(line.suggestedPrice)}</p>
+                {editingPriceId === line.id ? (
+                  <input
+                    ref={priceInputRef}
+                    className="field mt-2 w-full max-w-[10rem] text-2xl font-semibold tracking-tight"
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    min="0"
+                    value={priceDraft}
+                    aria-label={`Edit price for ${line.partType || line.title}`}
+                    onChange={(e) => setPriceDraft(e.target.value)}
+                    onBlur={() => void commitPrice(line.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void commitPrice(line.id);
+                      }
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setEditingPriceId("");
+                      }
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="mt-2 block rounded-md text-left text-2xl font-semibold tracking-tight hover:bg-[var(--wash)]"
+                    title="Double-tap to edit price"
+                    onDoubleClick={() => beginEditPrice(line)}
+                    onClick={() => onPriceActivate(line)}
+                  >
+                    {money(line.suggestedPrice)}
+                  </button>
+                )}
                 {(line.priceLow != null || line.priceHigh != null) && (
                   <p className="text-xs text-[var(--muted)]">
                     Market: {money(line.priceLow)}–{money(line.priceHigh)}
@@ -620,7 +848,7 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
                   className={`btn-secondary text-xs ${
                     dragOverLineId === line.id ? "ring-2 ring-[var(--accent)] ring-offset-1" : ""
                   }`}
-                  disabled={Boolean(busy) || isUploading}
+                  disabled={isUploading}
                   onClick={() => triggerUpload(line.id)}
                   onDragOver={(event) => {
                     event.preventDefault();
@@ -638,12 +866,12 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
                   ) : (
                     <Upload size={14} />
                   )}
-                  Upload photo
+                  {showImage ? "Replace photo" : "Upload photo"}
                 </button>
                 <button
                   type="button"
                   className="btn-secondary text-xs"
-                  disabled={Boolean(busy) || isUploading}
+                  disabled={isUploading}
                   onClick={() => {
                     setPasteUrlLineId((current) => (current === line.id ? "" : line.id));
                     setPasteUrl("");
@@ -651,6 +879,19 @@ export function PartSheetClient({ initial }: { initial: PartSheetData }) {
                 >
                   <Link2 size={14} />
                   Paste URL
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary text-xs"
+                  disabled={isUploading || isSearching}
+                  onClick={() => void searchOtherWebsites(line.id)}
+                >
+                  {isSearching ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Globe size={14} />
+                  )}
+                  Search other website
                 </button>
               </div>
               {pasteUrlLineId === line.id && (

@@ -55,22 +55,31 @@ export async function findPartSheetForSourceItem(userId: string, itemId: string)
   });
 }
 
-/** Match analyzed sheets by exact inventory barcode only — not model or bin. */
+function isCompletedPartSheet<T extends { lines: unknown[] }>(sheet: T | null): sheet is T {
+  return Boolean(sheet && sheet.lines.length > 0);
+}
+
+/** Match a part sheet to this inventory item only — never another product that shares a SKU. */
 export async function findPartSheetForScannedItem(
   userId: string,
   item: { id: string; sku?: string | null },
 ) {
   const byId = await findPartSheetForSourceItem(userId, item.id);
-  if (byId) return byId;
+  if (isCompletedPartSheet(byId)) return byId;
 
   const sku = String(item.sku ?? "").trim();
   if (!sku) return null;
 
-  return prisma.partSheet.findFirst({
-    where: { userId, sourceItemSku: sku },
+  const bySku = await prisma.partSheet.findFirst({
+    where: {
+      userId,
+      sourceItemSku: sku,
+      OR: [{ sourceItemId: null }, { sourceItemId: item.id }],
+    },
     include: { lines: { orderBy: { sortOrder: "asc" } } },
     orderBy: { createdAt: "desc" },
   });
+  return isCompletedPartSheet(bySku) ? bySku : null;
 }
 
 export async function createPartSheetFromAnalysis(

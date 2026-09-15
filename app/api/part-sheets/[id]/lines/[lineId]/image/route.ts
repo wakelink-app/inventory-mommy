@@ -30,7 +30,7 @@ export async function POST(request: Request, context: RouteContext) {
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
       const file = form.get("file");
-      if (!(file instanceof File)) {
+      if (!(file instanceof Blob) || file.size === 0) {
         return NextResponse.json({ error: "Missing file" }, { status: 400 });
       }
       const buffer = await fileToJpegBuffer(file);
@@ -51,6 +51,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const stored = await persistPartImageUrl(url, {
       allowAnyHttps: true,
+      skipValidation: true,
       part: { title: line.title, partType: line.partType },
     });
     if (!stored) {

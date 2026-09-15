@@ -30,9 +30,11 @@ export function partImageProxyUrl(remoteUrl: string) {
 
 export function normalizeStoredPartImageUrl(stored: string | null | undefined): string | null {
   if (!stored) return null;
-  if (isLocalPartImageUrl(stored) || stored.startsWith("/part-images/")) return stored;
-  if (stored.startsWith("/api/part-image?")) return stored;
-  if (isEbayImageUrl(stored)) return partImageProxyUrl(stored);
+  const value = stored.trim();
+  if (!value) return null;
+  if (isLocalPartImageUrl(value) || value.startsWith("/part-images/")) return value;
+  if (value.startsWith("/api/part-image?")) return value;
+  if (isEbayImageUrl(value)) return partImageProxyUrl(value);
   return null;
 }
 
@@ -61,6 +63,7 @@ export async function cacheRemotePartImage(
   try {
     const response = await fetch(normalized, {
       redirect: "follow",
+      signal: AbortSignal.timeout(8000),
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

@@ -25,29 +25,6 @@ export function CapturePhone({ token }: { token: string }) {
   const cameraRef = useRef<HTMLInputElement>(null);
   const libraryRef = useRef<HTMLInputElement>(null);
 
-  async function writePublicSession(next: CaptureSessionState) {
-    if (!next.sessionUploadUrl) return;
-    const payload = {
-      token: next.token,
-      status: next.status,
-      hint: next.hint,
-      itemId: next.itemId,
-      maxPhotos: next.maxPhotos,
-      expiresAt: next.expiresAt,
-      photos: (next.slots ?? [])
-        .filter((slot) => next.photos.some((photo) => photo.id === slot.id))
-        .map((slot) => ({ id: slot.id, path: slot.path })),
-      slots: next.slots,
-      sessionUploadUrl: next.sessionUploadUrl,
-    };
-    const res = await fetch(next.sessionUploadUrl, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "x-upsert": "true" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error("Could not update session");
-  }
-
   async function upload(list: FileList | null) {
     if (!list || !session) return;
     const files = Array.from(list).filter((file) => file.type.startsWith("image/") || file.type === "");
@@ -71,8 +48,21 @@ export function CapturePhone({ token }: { token: string }) {
           photos = [...photos, { id: slot.id, url: URL.createObjectURL(file) }];
         }
         const next = { ...session, photos, status: "capturing" as const, hint };
-        await writePublicSession(next);
         setSession(next);
+        await api<CaptureSessionState>(`/api/capture/${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "sync",
+            hint,
+            photos: photos
+              .map((photo) => {
+                const slot = session.slots?.find((item) => item.id === photo.id);
+                return slot ? { id: photo.id, path: slot.path } : null;
+              })
+              .filter((photo): photo is { id: string; path: string } => photo != null),
+          }),
+        });
         return;
       }
       const remaining = session.maxPhotos - session.photos.length;
@@ -106,34 +96,10 @@ export function CapturePhone({ token }: { token: string }) {
     setBusy("Saving photos…");
     setError("");
     try {
-      if (session?.sessionUploadUrl) {
-        const next = { ...session, status: "ready" as const, hint };
-        await fetch(session.sessionUploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", "x-upsert": "true" },
-          body: JSON.stringify({
-            token: next.token,
-            status: "ready",
-            hint: next.hint,
-            itemId: next.itemId,
-            maxPhotos: next.maxPhotos,
-            expiresAt: next.expiresAt,
-            photos: (next.slots ?? [])
-              .filter((slot) => next.photos.some((photo) => photo.id === slot.id))
-              .map((slot) => ({ id: slot.id, path: slot.path })),
-            slots: next.slots,
-            sessionUploadUrl: next.sessionUploadUrl,
-          }),
-        }).then((res) => {
-          if (!res.ok) throw new Error("Could not continue");
-        });
-        setSession(next);
-        return;
-      }
       const next = await api<CaptureSessionState>(`/api/capture/${token}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "done" }),
+        body: JSON.stringify({ action: "done", hint }),
       });
       setSession(next);
     } catch (err) {
